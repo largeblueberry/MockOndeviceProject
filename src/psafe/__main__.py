@@ -47,10 +47,14 @@ def main(argv: list[str] | None = None) -> int:
         logging.error("config error: %s", e)
         return 2
 
-    if cfg.runner.mode == "sync":
-        SyncRunner(c, max_frames=args.max_frames).run()
-        return 0
-    result = ThreadedRunner(c, max_seconds=args.seconds).run()
+    try:
+        if cfg.runner.mode == "sync":
+            SyncRunner(c, max_frames=args.max_frames).run()
+            return 0
+        result = ThreadedRunner(c, max_seconds=args.seconds).run()
+    except (FileNotFoundError, RuntimeError) as e:  # model / camera / video failed to open
+        logging.error("startup failed: %s", e)
+        return 2
     return 1 if result.error else 0
 
 

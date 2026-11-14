@@ -31,7 +31,8 @@ def make_clock(cfg: AppConfig) -> Clock:
 
 def build(cfg: AppConfig, clock: Clock | None = None) -> Components:
     clock = clock or make_clock(cfg)
-    inject = {"clock": clock}
+    # Runtime values a component may ask for by naming a constructor parameter.
+    inject = {"clock": clock, "roi": cfg.fsm.roi, "person_conf_low": cfg.fsm.person_conf_low}
     return Components(
         cfg=cfg,
         clock=clock,

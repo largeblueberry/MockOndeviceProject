@@ -36,6 +36,25 @@ def process_frame(c: Components, pkt: FramePacket) -> tuple[Decision, Detections
     return c.fsm.step(dets, c.clock.now(), fault), dets
 
 
+def notify_frame(c: Components, pkt: FramePacket, dets: Detections | None, decision: Decision) -> None:
+    for o in c.outputs:
+        try:
+            o.on_frame(pkt, dets, decision)
+        except Exception:
+            log.exception("output %s.on_frame failed", type(o).__name__)
+
+
+def poll_outputs(c: Components) -> bool:
+    """Main-thread GUI hook. False if any output asked to stop."""
+    keep = True
+    for o in c.outputs:
+        try:
+            keep = o.poll() and keep
+        except Exception:
+            log.exception("output %s.poll failed", type(o).__name__)
+    return keep
+
+
 def open_all(c: Components, stack: ExitStack) -> float:
     """Open outputs -> detector -> source (camera LAST, so model loading time
     doesn't make the first frames stale). Each close is registered as soon as
@@ -107,8 +126,12 @@ class SyncRunner:
                 decision, dets = process_frame(c, pkt)
                 last_t = decision.decided_at
                 self._emit(decision, result)
+                notify_frame(c, pkt, dets, decision)
                 result.frames += 1
                 result.infer_ms_total += dets.infer_ms if dets else 0.0
+                if not poll_outputs(c):
+                    log.info("stop requested by output")
+                    break
 
             self._emit(unsafe(State.FAULT, "shutdown", c.clock.now()), result, record=False)
 
@@ -254,15 +277,22 @@ class ThreadedRunner:
             if now >= next_metrics:
                 last = self._log_metrics(last, now - next_metrics + self.metrics_interval_s)
                 next_metrics = now + self.metrics_interval_s
-            self._stop.wait(0.05)
+            if not poll_outputs(c):
+                log.info("stop requested by output")
+                return
+            self._stop.wait(0.03)
 
     def _log_metrics(self, last: tuple[int, int], interval: float) -> tuple[int, int]:
         cap, proc = self.frame_slot.put_count, self.result.frames
         d = self.board.latest()
+        rg = self.c.health.take_ranges()
+        fmt = lambda k, p: f"{rg[k][0]:.{p}f}..{rg[k][1]:.{p}f}" if k in rg else "-"  # noqa: E731
         log.info(
-            "fps capture %.1f / model %.1f | dropped %d | avg infer %.1f ms | %s %s",
+            "fps capture %.1f / model %.1f | dropped %d | avg infer %.1f ms | "
+            "bright %s contrast %s diff %s | %s %s",
             (cap - last[0]) / interval, (proc - last[1]) / interval, self.frame_slot.dropped,
-            self.result.avg_infer_ms, d.yn if d else "-", d.state.value if d else "-",
+            self.result.avg_infer_ms, fmt("brightness", 0), fmt("contrast", 1), fmt("diff", 2),
+            d.yn if d else "-", d.state.value if d else "-",
         )
         return cap, proc
 
@@ -284,12 +314,14 @@ class ThreadedRunner:
                 return
             if pkt is None:
                 decision = c.fsm.on_no_frame(c.clock.now())
+                self.board.publish(decision)
                 r.timeouts += 1
             else:
                 decision, dets = process_frame(c, pkt)
+                self.board.publish(decision)        # publish first: drawing must not delay the heartbeat
                 r.frames += 1
                 r.infer_ms_total += dets.infer_ms if dets else 0.0
-            self.board.publish(decision)
+                notify_frame(c, pkt, dets, decision)
             if self.record:
                 r.decisions.append(decision)
 

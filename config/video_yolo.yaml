@@ -1,0 +1,20 @@
+# Recorded clip + YOLO ONNX. Same pipeline as the webcam, repeatable input.
+#   python -m psafe --config config/video_yolo.yaml
+# runner.mode: sync + clock: fake  -> runs as fast as the model allows, deterministic
+# runner.mode: threaded            -> real time, like the live camera
+
+source:
+  name: video
+  options: { path: recordings/clip.mp4, loop: false }
+
+model:
+  name: yolo_onnx
+  options:
+    weights: models/yolo11n_320.onnx
+
+outputs:
+  - name: console
+  - name: viewer
+
+runner:
+  mode: threaded

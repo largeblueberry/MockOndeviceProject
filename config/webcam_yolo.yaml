@@ -1,0 +1,42 @@
+# Live webcam + YOLO ONNX + viewer window.
+#   python -m psafe --config config/webcam_yolo.yaml
+# Swap the model by changing model.options.weights (e.g. yolo11n_640.onnx).
+
+source:
+  name: webcam
+  options: { index: 0, width: 640, height: 480, fps: 30 }
+
+model:
+  name: yolo_onnx
+  options:
+    weights: models/yolo11n_320.onnx
+    conf_threshold: 0.20
+    threads: 4
+    # class_map: { minifig: person }   # fine-tuned model -> internal name
+
+outputs:
+  - name: console
+  - name: viewer
+    options:
+      scale: 1.0
+      # record_path: recordings/demo.mp4
+
+fsm:
+  person_conf_low: 0.30
+  clear_time_s: 3.0
+  clear_min_frames: 10
+  max_frame_age_ms: 500
+  fault_recover_frames: 5
+  roi: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]
+
+health:
+  min_brightness: 10
+  max_brightness: 245
+  freeze_diff_threshold: 0.05       # PC webcam static noise floor 0.20-0.28 (2026-11-14); a stuck camera gives ~0
+  freeze_frames: 15                # ~0.5 s at 30 fps; 1 gave false frozen_frame on a real webcam (2026-11-14)
+  max_decision_age_ms: 600
+
+runner:
+  mode: threaded
+  heartbeat_ms: 200
+  metrics_interval_s: 5

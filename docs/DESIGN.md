@@ -473,6 +473,37 @@ bootcampProject/
 | 로그 | 표준 `logging` | 상태 전이·메트릭 |
 | ESP32 | Arduino IDE (또는 PlatformIO) | HW 입문자 기준 Arduino 프레임워크 |
 
+### 14.1 모델 준비 (ONNX export)
+`ultralytics`(+PyTorch, 1~2GB)는 **변환에만** 필요하므로 Colab에서 한 번 실행하고 `.onnx`만 가져온다.
+
+```python
+!pip install -q ultralytics onnx onnxslim
+from ultralytics import YOLO
+import shutil
+for size in (320, 640):
+    path = YOLO("yolo11n.pt").export(format="onnx", imgsz=size, opset=12, simplify=True, dynamic=False)
+    shutil.move(path, f"yolo11n_{size}.onnx")
+from google.colab import files
+files.download("yolo11n_320.onnx"); files.download("yolo11n_640.onnx")
+```
+→ `models/` 에 저장. 파인튜닝 모델도 같은 방식으로 export하면 `YoloOnnxDetector`가 ONNX 메타데이터에서 클래스 이름을 읽는다. 클래스명이 `person`이 아니면 `class_map: { minifig: person }`.
+
+### 14.2 실행 구성 (config/)
+| 파일 | 입력 | 모델 | 용도 |
+|---|---|---|---|
+| `default.yaml` | dummy 시나리오 | dummy | 로직 개발·테스트 |
+| `webcam_yolo.yaml` | 웹캠 | YOLO ONNX | 실시간 + 뷰어 (시연 화면) |
+| `video_yolo.yaml` | 녹화 클립 | YOLO ONNX | 반복 가능한 모델 비교 |
+
+카메라 점검·클립 녹화: `python -m psafe.tools.camcheck [--record recordings/x.mp4]` — health 임계값(밝기, 프레임 차이)을 **실측**해서 설정에 반영한다.
+
+### 14.3 Output 훅
+| 메서드 | 스레드 | 호출 시점 | 용도 |
+|---|---|---|---|
+| `send(decision)` | heartbeat | 200ms마다 | ESP32, 콘솔 |
+| `on_frame(pkt, dets, decision)` | worker | 처리된 프레임마다 | 뷰어, 녹화 (Decision 게시 **후** 호출 → 그리기가 판단을 늦추지 않음) |
+| `poll() -> bool` | main | ~30Hz | GUI(imshow/waitKey). False = 종료 요청 |
+
 ---
 
 ## 15. 미결 사항 (Open Questions)
