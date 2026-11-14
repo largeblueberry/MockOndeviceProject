@@ -1,0 +1,10 @@
+description: "S5 inference too slow (700 ms > max_frame_age_ms 500) - every result is stale, never Y"
+fps: 15
+config:
+  model: { options: { latency_ms: 700 } }
+timeline:
+  - { from: 0.0, to: 10.0, objects: [] }
+expect:
+  - { at: 2.0, safe: false }
+  - { at: 5.0, safe: false }
+  - { at: 9.0, safe: false }

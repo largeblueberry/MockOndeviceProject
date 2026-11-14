@@ -1,0 +1,11 @@
+description: "S9 camera driver stuck on an old (empty) frame while a person walks in"
+fps: 15
+timeline:
+  - { from: 0.0, to: 5.0,  objects: [] }
+  - { from: 5.0, to: 9.0,  objects: [person], camera: freeze }
+  - { from: 9.0, to: 10.0, objects: [person] }
+expect:
+  - { at: 4.0, safe: true }
+  - { at: 6.0, safe: false }    # identical frames -> FAULT
+  - { at: 8.5, safe: false }
+  - { at: 9.5, safe: false }    # camera back, person visible

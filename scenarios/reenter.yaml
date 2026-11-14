@@ -1,0 +1,14 @@
+description: "S2 driver leaves, comes back during verification, leaves again"
+fps: 15
+timeline:
+  - { from: 0.0, to: 2.0,  objects: [] }
+  - { from: 2.0, to: 5.0,  objects: [car, person] }
+  - { from: 5.0, to: 6.5,  objects: [car] }            # gone... (verifying)
+  - { from: 6.5, to: 8.0,  objects: [car, person] }    # ...back before clear_time_s
+  - { from: 8.0, to: 14.0, objects: [car] }
+expect:
+  - { at: 4.0,  safe: false }
+  - { at: 6.0,  safe: false }   # verifying, not long enough
+  - { at: 7.0,  safe: false }   # back -> must reset the clear timer
+  - { at: 10.5, safe: false }   # timer restarted at 8.0
+  - { at: 12.0, safe: true }    # 8.0 + 3 s

@@ -1,0 +1,14 @@
+description: "S3 detector flickers (misses the person 30% of frames) - must never say Y while the person is there"
+fps: 15
+config:
+  model: { options: { miss_rate: 0.3, seed: 1 } }
+timeline:
+  - { from: 0.0,  to: 1.0,  objects: [] }
+  - { from: 1.0,  to: 10.0, objects: [car, person] }
+  - { from: 10.0, to: 15.0, objects: [car] }
+expect:
+  - { at: 3.0,  safe: false }
+  - { at: 6.0,  safe: false }
+  - { at: 9.5,  safe: false }
+  - { at: 12.0, safe: false }   # clear since ~10.0, not 3 s yet
+  - { at: 14.0, safe: true }

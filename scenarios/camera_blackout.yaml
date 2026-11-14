@@ -1,0 +1,12 @@
+description: "S8 lens covered while a person walks in - model sees nothing, health check must say N"
+fps: 15
+timeline:
+  - { from: 0.0, to: 4.0,  objects: [] }
+  - { from: 4.0, to: 7.0,  objects: [person], camera: blackout }
+  - { from: 7.0, to: 12.0, objects: [] }
+expect:
+  - { at: 3.5,  safe: true }
+  - { at: 4.5,  safe: false }   # dark frame -> FAULT
+  - { at: 6.5,  safe: false }
+  - { at: 9.0,  safe: false }   # recovering
+  - { at: 11.5, safe: true }

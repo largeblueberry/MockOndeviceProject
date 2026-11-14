@@ -1,0 +1,13 @@
+description: "S7 ROI: a person fully outside the bay is ignored, one touching the edge is not"
+fps: 15
+# default ROI is x,y in [0.1, 0.9]
+timeline:
+  - { from: 0.0, to: 5.0,  objects: [{ cls: person, bbox: [0.00, 0.3, 0.08, 0.8] }] }  # outside
+  - { from: 5.0, to: 8.0,  objects: [{ cls: person, bbox: [0.02, 0.3, 0.12, 0.8] }] }  # overlaps edge
+  - { from: 8.0, to: 13.0, objects: [] }
+expect:
+  - { at: 4.0,  safe: true }
+  - { at: 6.0,  safe: false }
+  - { at: 7.5,  safe: false }
+  - { at: 10.5, safe: false }
+  - { at: 12.0, safe: true }

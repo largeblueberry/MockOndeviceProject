@@ -1,0 +1,12 @@
+description: "S4 camera stops sending frames for 2 s (cable pulled / driver crash)"
+fps: 15
+timeline:
+  - { from: 0.0, to: 5.0,  objects: [] }
+  - { from: 5.0, to: 7.0,  objects: [], camera: outage }
+  - { from: 7.0, to: 13.0, objects: [] }
+expect:
+  - { at: 4.0,  safe: true }    # empty bay, clear after 3 s
+  - { at: 5.8,  safe: false }   # no frame for > max_frame_age_ms -> FAULT
+  - { at: 6.9,  safe: false }
+  - { at: 9.0,  safe: false }   # frames are back, but must re-verify from scratch
+  - { at: 11.5, safe: true }    # 7.0 + recover frames + 3 s

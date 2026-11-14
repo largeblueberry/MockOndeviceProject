@@ -13,6 +13,7 @@ from psafe.sources import SOURCES, Source
 
 @dataclass
 class Components:
+    cfg: AppConfig
     clock: Clock
     source: Source
     detector: Detector
@@ -29,10 +30,12 @@ def make_clock(cfg: AppConfig) -> Clock:
 
 def build(cfg: AppConfig, clock: Clock | None = None) -> Components:
     clock = clock or make_clock(cfg)
+    inject = {"clock": clock}
     return Components(
+        cfg=cfg,
         clock=clock,
-        source=SOURCES.create(cfg.source.name, clock=clock, **cfg.source.options),
-        detector=DETECTORS.create(cfg.model.name, **cfg.model.options),
+        source=SOURCES.create(cfg.source.name, inject, **cfg.source.options),
+        detector=DETECTORS.create(cfg.model.name, inject, **cfg.model.options),
         fsm=SafetyFSM(cfg.fsm),
-        outputs=[OUTPUTS.create(o.name, **o.options) for o in cfg.outputs],
+        outputs=[OUTPUTS.create(o.name, inject, **o.options) for o in cfg.outputs],
     )

@@ -1,0 +1,10 @@
+description: "S6 normal exit: driver gets in, car leaves"
+fps: 15
+timeline:
+  - { from: 0.0, to: 3.0,  objects: [car, person] }    # driver walking to the car
+  - { from: 3.0, to: 6.0,  objects: [car] }            # driver inside, car leaving
+  - { from: 6.0, to: 12.0, objects: [] }
+expect:
+  - { at: 2.0,  safe: false }
+  - { at: 5.0,  safe: false }
+  - { at: 7.0,  safe: true }    # 3.0 + 3 s
