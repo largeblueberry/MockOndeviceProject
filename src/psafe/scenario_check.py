@@ -15,11 +15,10 @@ from typing import Any
 import yaml
 
 from psafe.app import build
-from psafe.core.clock import FakeClock
 from psafe.core.config import AppConfig, parse_config
 from psafe.core.packets import Decision
 from psafe.fsm.roi import Roi
-from psafe.runners import RunResult, SyncRunner
+from psafe.runners import RunResult, SyncRunner, ThreadedRunner
 from psafe.sources.scenario import Scenario, load_scenario
 
 
@@ -38,12 +37,13 @@ def deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
 SCENARIO_DEFAULTS = {"source": {"options": {"width": 160, "height": 120}}}
 
 
-def config_for_scenario(base_raw: dict[str, Any], scenario_path: str | Path, sc: Scenario) -> AppConfig:
+def config_for_scenario(base_raw: dict[str, Any], scenario_path: str | Path, sc: Scenario,
+                        mode: str = "sync") -> AppConfig:
     raw = deep_merge(base_raw, SCENARIO_DEFAULTS)
     raw = deep_merge(raw, sc.config)
     raw = deep_merge(raw, {
         "source": {"name": "dummy", "options": {"scenario": str(scenario_path), "loop": False}},
-        "runner": {"mode": "sync", "clock": "fake"},
+        "runner": {"mode": mode, "clock": "fake" if mode == "sync" else "real"},
     })
     return parse_config(raw)
 
@@ -98,18 +98,30 @@ class ScenarioReport:
 
     def summary(self) -> str:
         status = "PASS" if self.passed else "FAIL"
+        r = self.result
         head = f"[{status}] {self.scenario.name}: {len(self.scenario.expect)} expectations, " \
-               f"{self.result.frames} frames, {self.result.skipped} skipped, {self.result.timeouts} timeouts"
+               f"{r.frames} frames, {r.skipped + r.dropped} dropped, {r.timeouts} timeouts"
+        if r.heartbeats:
+            head += f", {r.heartbeats} heartbeats ({r.stale_heartbeats} stale)"
         return "\n".join([head, *("    " + f for f in self.failures)])
 
 
 def run_scenario(scenario_path: str | Path, base_config: str | Path = "config/default.yaml",
-                 extra_outputs: list | None = None) -> ScenarioReport:
+                 extra_outputs: list | None = None, mode: str = "sync") -> ScenarioReport:
+    """mode="sync": FakeClock, instant, deterministic.
+    mode="threaded": real clock and real threads -> takes the scenario's real
+    duration, timing jitter included. Same expectations must still hold."""
     sc = load_scenario(scenario_path)
     with open(base_config, encoding="utf-8") as f:
         base_raw = yaml.safe_load(f) or {}
-    cfg = config_for_scenario(base_raw, scenario_path, sc)
-    c = build(cfg, clock=FakeClock())
+    cfg = config_for_scenario(base_raw, scenario_path, sc, mode)
+    c = build(cfg)
     c.outputs.extend(extra_outputs or [])
-    result = SyncRunner(c).run()
-    return ScenarioReport(sc, result, check(sc, result, c.fsm.roi))
+    if mode == "sync":
+        result = SyncRunner(c).run()
+    else:
+        result = ThreadedRunner(c, record=True).run()
+    failures = check(sc, result, c.fsm.roi)
+    if result.error:
+        failures.insert(0, f"run error: {result.error}")
+    return ScenarioReport(sc, result, failures)

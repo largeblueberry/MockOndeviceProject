@@ -28,7 +28,8 @@ def test_default_pipeline_runs_end_to_end():
     result = SyncRunner(c).run()
 
     assert result.frames == 15 * 15              # 15 s scenario at 15 fps
-    assert len(sink.got) == result.frames
+    assert len(sink.got) == result.frames + 1           # + final "shutdown" N
+    assert (sink.got[-1].safe, sink.got[-1].reason) == (False, "shutdown")
     assert [d.seq for d in result.decisions] == list(range(result.frames))
     assert result.decisions[0].safe is False            # never Y on the first frame
     assert result.decisions[-1].safe is True            # bay empty at the end

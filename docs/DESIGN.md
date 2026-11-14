@@ -63,6 +63,13 @@
 | T2 Worker | 최신 프레임 꺼내 추론 → FSM → Decision 갱신 | 가장 느린 구간. 혼자 자기 속도로 돈다 |
 | T3 Heartbeat | 200ms마다 최신 Decision을 출력. **Decision이 오래됐으면 N** | 추론이 멈춰도 출력은 살아서 N을 보내야 함 |
 
+**ThreadedRunner 구현 규칙** (`runners.py`)
+- **FSM은 Worker 스레드만 소유** → FSM에 락 불필요. Heartbeat는 `DecisionBoard`(락 1개)로 최신 Decision만 읽는다.
+- **Heartbeat가 Decision 나이를 직접 검사**: Worker가 `predict()` 안에서 멈추면 `on_no_frame()`조차 못 부른다. 이걸 잡는 건 Heartbeat뿐 → `decision_stale` N.
+- **열기 순서: Output → Detector(load·warmup) → Source(카메라 마지막)**. 모델 로딩 동안 쌓인 프레임이 첫 판단부터 stale이 되지 않게.
+- **어떤 스레드든 죽으면 run 종료** (`result.error`). 종료 시 **마지막 송신은 항상 N(`shutdown`)**. 재시작은 systemd, 그 사이 공백은 ESP32 워치독이 커버.
+- Output 하나의 예외가 다른 Output을 막지 않는다 (각각 try/except).
+
 **v0.1 → v0.2 변경 이유**
 - **전처리를 모델 안으로**: 입력 크기·정규화·색 순서는 모델마다 다르다. 전처리를 따로 두면 모델 교체 시 두 곳을 고쳐야 한다.
 - **Model→FSM 큐 제거**: FSM은 수 μs 짜리 계산. 큐·스레드를 두면 복잡도만 늘고 이득이 없다.
@@ -431,6 +438,7 @@ bootcampProject/
 | M1 | 주말 | 패킷, LatestSlot, Clock, config 로딩, 인터페이스(ABC), SyncRunner 골격 | Dummy 프레임이 끝까지 흐름 |
 | M2 | 주말 | DummySource + 시나리오 + DummyDetector(노이즈) | S1~S6 시나리오 재생 |
 | M3 | 주말 | FSM + ROI + Console 출력 | S1~S6 기대 결과 자동 검증 통과 |
+| M3.5 | 주말 | ThreadedRunner (capture / worker / heartbeat + supervisor) | 9개 시나리오 실시간 모드 통과 (`pytest -m slow`) |
 | M4 | 주말~월 | 실제 모델(YOLO ONNX) PC에서 연결, 영상/웹캠 입력 | 모델 이름만 바꿔 교체 동작 |
 | M5 | 월 (HW 수령 후) | RPi 이식, 카메라, 속도 측정, ESP32 연결 | RPi에서 end-to-end Y/N |
 

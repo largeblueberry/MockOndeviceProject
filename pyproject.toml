@@ -23,3 +23,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = ["slow: real-time tests (threaded scenarios). Run with: pytest -m slow"]
