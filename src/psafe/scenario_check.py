@@ -18,6 +18,7 @@ from psafe.app import build
 from psafe.core.clock import FakeClock
 from psafe.core.config import AppConfig, parse_config
 from psafe.core.packets import Decision
+from psafe.fsm.roi import Roi
 from psafe.runners import RunResult, SyncRunner
 from psafe.sources.scenario import Scenario, load_scenario
 
@@ -54,8 +55,27 @@ def decision_at(decisions: list[Decision], t: float) -> Decision | None:
     return decisions[i - 1] if i else None
 
 
-def check(sc: Scenario, result: RunResult) -> list[str]:
-    failures = []
+def unsafe_yes(sc: Scenario, result: RunResult, roi: Roi) -> list[str]:
+    """Safety invariant over EVERY decision, not just the sampled `expect` points:
+    a Y must never be based on a frame where a person was really in the ROI.
+    Uses the scenario world (truth), not what the camera/model saw, so it also
+    catches blackout/freeze cases the model was blind to."""
+    bad = []
+    for d in result.decisions:
+        if not d.safe or d.seq < 0:
+            continue
+        t = d.seq / sc.fps
+        if any(o.cls == "person" and roi.touches(o.bbox) for o in sc.objects_at(t)):
+            bad.append(d)
+    if not bad:
+        return []
+    first = bad[0]
+    return [f"UNSAFE: {len(bad)} Y decision(s) while a person was in the ROI "
+            f"(first: frame t={first.seq / sc.fps:.2f}s, {first.state.value}: {first.reason})"]
+
+
+def check(sc: Scenario, result: RunResult, roi: Roi | None = None) -> list[str]:
+    failures = unsafe_yes(sc, result, roi) if roi else []
     for e in sc.expect:
         d = decision_at(result.decisions, result.start + e.at)
         want = "Y" if e.safe else "N"
@@ -92,4 +112,4 @@ def run_scenario(scenario_path: str | Path, base_config: str | Path = "config/de
     c = build(cfg, clock=FakeClock())
     c.outputs.extend(extra_outputs or [])
     result = SyncRunner(c).run()
-    return ScenarioReport(sc, result, check(sc, result))
+    return ScenarioReport(sc, result, check(sc, result, c.fsm.roi))

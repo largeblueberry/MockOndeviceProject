@@ -9,9 +9,24 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 
 from psafe.app import Components
-from psafe.core.packets import Decision
+from psafe.core.packets import Decision, Detections, FramePacket
 
 log = logging.getLogger("psafe.runner")
+
+
+def process_frame(c: Components, pkt: FramePacket) -> tuple[Decision, Detections | None]:
+    """health check -> detector -> FSM for one frame. Shared by all runners.
+
+    A detector exception must never crash the loop or leave the last Y
+    standing: it becomes a FAULT decision.
+    """
+    fault = c.health.check(pkt)
+    try:
+        dets = c.detector.predict(pkt)
+    except Exception:
+        log.exception("detector failed on seq %d", pkt.seq)
+        return c.fsm.fault("detector_error", c.clock.now()), None
+    return c.fsm.step(dets, c.clock.now(), fault), dets
 
 
 @dataclass
@@ -65,11 +80,11 @@ class SyncRunner:
                     self._emit(c.fsm.on_no_frame(last_t), result)
                     result.timeouts += 1
 
-                dets = c.detector.predict(pkt)
-                last_t = c.clock.now()
-                self._emit(c.fsm.step(dets, last_t), result)
+                decision, dets = process_frame(c, pkt)
+                last_t = decision.decided_at
+                self._emit(decision, result)
                 result.frames += 1
-                result.infer_ms_total += dets.infer_ms
+                result.infer_ms_total += dets.infer_ms if dets else 0.0
 
         result.skipped = getattr(c.source, "skipped", 0)
         log.info(

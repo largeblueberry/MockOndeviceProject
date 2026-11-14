@@ -37,7 +37,8 @@ class FsmConfig:
 class HealthConfig:
     min_brightness: float = 10.0
     max_brightness: float = 245.0
-    freeze_diff_threshold: float = 0.5
+    freeze_diff_threshold: float = 0.5   # mean abs pixel diff below this = "same frame"
+    freeze_frames: int = 1               # consecutive same frames before FAULT (1 = strictest)
     max_decision_age_ms: float = 600.0
 
 

@@ -317,6 +317,28 @@ RPi → ESP32, **주기 200ms** (Decision이 바뀌지 않아도 계속 송신 =
 - **사람 1프레임 감지 → 즉시 OCCUPIED** (conf ≥ `person_conf_low`, 낮게 설정 → Recall 우선)
 - `VERIFYING → CLEAR`: **T초 연속 + 최소 N프레임** 모두 만족 (FPS가 낮을 때 시간만 보고 Y 내는 것 방지)
 - `FAULT` 복귀 시 바로 CLEAR가 아니라 **VERIFYING부터** 다시
+- `FAULT` 중 사람이 보이면 → `OCCUPIED` (카메라가 사람을 볼 수 있다는 것 자체가 정상 동작의 증거, 어차피 N)
+- 클리어 시간은 **프레임 촬영 timestamp 기준** = "카메라가 빈 구역을 본 시간". CPU 처리 시간이 아님
+- 시간 비교에는 1µs 허용오차(`TIME_EPS`). 부동소수점(`2.8 - 1.8 = 0.99999…`) 때문에 경계에서 결과가 흔들리지 않게
+
+### 8.2.1 Fault 원인 (reason 값)
+| reason | 발생 위치 | 의미 |
+|---|---|---|
+| `stale_frame` | FSM | `now - 촬영시각 > max_frame_age_ms` |
+| `out_of_order` | FSM | seq/timestamp가 역행 |
+| `no_frame` | Runner | 프레임 대기 타임아웃 |
+| `detector_error` | Runner | `predict()` 예외 — 루프는 죽지 않고 N |
+| `too_dark` / `too_bright` | HealthMonitor | 렌즈 가림, 과노출 |
+| `frozen_frame` | HealthMonitor | 연속 프레임 픽셀 차이 ≈ 0 (`freeze_frames` 회 연속) |
+| `recovering` | FSM | Fault 후 정상 프레임 `fault_recover_frames` 개 대기 중 |
+
+> **Source 구현 규칙**: `FramePacket.timestamp`는 반드시 **촬영 시각**이어야 한다. 읽은 시각을 넣으면 늦게 처리된 프레임의 나이가 짧게 계산되어 `stale_frame` 검사가 무력화된다.
+
+### 8.2.2 안전 불변식 (자동 검증)
+시나리오 검증은 `expect` 시점 외에 **모든 Decision** 에 대해 다음을 검사한다:
+> "실제 world에 ROI 내 사람이 있던 프레임을 근거로 Y가 나간 적이 없다."
+
+카메라/모델이 본 것이 아니라 시나리오의 **실제 상태(world)** 기준이므로 blackout/freeze처럼 모델이 눈먼 상황도 잡는다. (`tests/test_health.py` — health check를 끄면 이 검사가 실패함을 확인)
 
 > 입차/출차 구분(차량 상태 포함)은 MVP 이후 확장. MVP는 "구역 내 사람 유무" 단일 판단에 집중.
 
@@ -351,7 +373,8 @@ fsm:
 health:
   min_brightness: 10
   max_brightness: 245
-  freeze_diff_threshold: 0.5
+  freeze_diff_threshold: 0.5   # 평균 픽셀 차이가 이보다 작으면 "같은 프레임"
+  freeze_frames: 1             # 연속 몇 장이면 FAULT (1 = 가장 엄격, 실제 카메라에서 튜닝)
   max_decision_age_ms: 600
 runner:
   mode: sync                # sync | threaded

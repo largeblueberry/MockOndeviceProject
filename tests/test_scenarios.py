@@ -15,7 +15,7 @@ from psafe.scenario_check import check, decision_at, run_scenario
 from psafe.sources.scenario import load_scenario, parse_scenario
 
 SCENARIOS = sorted(Path("scenarios").glob("*.yaml"))
-NEEDS_FSM = True  # M2: placeholder FSM. Set False in M3.
+NEEDS_FSM = False  # M3: real FSM in place.
 
 
 def _param(p: Path):

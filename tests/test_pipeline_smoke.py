@@ -30,7 +30,8 @@ def test_default_pipeline_runs_end_to_end():
     assert result.frames == 15 * 15              # 15 s scenario at 15 fps
     assert len(sink.got) == result.frames
     assert [d.seq for d in result.decisions] == list(range(result.frames))
-    assert all(not d.safe for d in result.decisions)   # placeholder FSM is fail-safe
+    assert result.decisions[0].safe is False            # never Y on the first frame
+    assert result.decisions[-1].safe is True            # bay empty at the end
     assert c.clock.now() == pytest.approx((result.frames - 1) / 15)  # fake time, no real waiting
 
 

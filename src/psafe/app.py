@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from psafe.core.clock import Clock, FakeClock, RealClock
 from psafe.core.config import AppConfig
-from psafe.fsm import SafetyFSM
+from psafe.fsm import HealthMonitor, SafetyFSM
 from psafe.models import DETECTORS, Detector
 from psafe.outputs import OUTPUTS, Output
 from psafe.sources import SOURCES, Source
@@ -17,6 +17,7 @@ class Components:
     clock: Clock
     source: Source
     detector: Detector
+    health: HealthMonitor
     fsm: SafetyFSM
     outputs: list[Output]
 
@@ -36,6 +37,7 @@ def build(cfg: AppConfig, clock: Clock | None = None) -> Components:
         clock=clock,
         source=SOURCES.create(cfg.source.name, inject, **cfg.source.options),
         detector=DETECTORS.create(cfg.model.name, inject, **cfg.model.options),
+        health=HealthMonitor(cfg.health),
         fsm=SafetyFSM(cfg.fsm),
         outputs=[OUTPUTS.create(o.name, inject, **o.options) for o in cfg.outputs],
     )

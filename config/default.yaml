@@ -28,6 +28,7 @@ health:
   min_brightness: 10
   max_brightness: 245
   freeze_diff_threshold: 0.5
+  freeze_frames: 1
   max_decision_age_ms: 600
 
 runner:
