@@ -1,0 +1,52 @@
+"""M1 acceptance: dummy frames flow source -> detector -> fsm -> output."""
+
+import pytest
+
+from psafe.app import build
+from psafe.core.clock import FakeClock
+from psafe.core.config import load_config
+from psafe.core.packets import Decision
+from psafe.models import DETECTORS
+from psafe.outputs.base import Output
+from psafe.runners import SyncRunner
+from psafe.sources.dummy import DummySource
+from psafe.sources.scenario import parse_scenario
+
+
+class Collect(Output):
+    def __init__(self):
+        self.got: list[Decision] = []
+
+    def send(self, decision):
+        self.got.append(decision)
+
+
+def test_default_pipeline_runs_end_to_end():
+    c = build(load_config("config/default.yaml"))
+    sink = Collect()
+    c.outputs.append(sink)
+    result = SyncRunner(c).run()
+
+    assert result.frames == 15 * 15              # 15 s scenario at 15 fps
+    assert len(sink.got) == result.frames
+    assert [d.seq for d in result.decisions] == list(range(result.frames))
+    assert all(not d.safe for d in result.decisions)   # placeholder FSM is fail-safe
+    assert c.clock.now() == pytest.approx((result.frames - 1) / 15)  # fake time, no real waiting
+
+
+def test_dummy_source_attaches_ground_truth_on_timeline():
+    sc = parse_scenario({"fps": 10, "timeline": [
+        {"from": 0, "to": 1, "objects": []},
+        {"from": 1, "to": 2, "objects": ["person"]},
+    ]})
+    src = DummySource(FakeClock(), sc, width=64, height=48)
+    frames = [src.read() for _ in range(20)]
+    assert src.read() is None                    # scenario ended
+    assert [len(f.meta["gt"]) for f in frames] == [0] * 10 + [1] * 10
+    assert frames[0].image.shape == (48, 64, 3)
+    assert frames[15].timestamp == pytest.approx(1.5)
+
+
+def test_unknown_model_name_lists_available():
+    with pytest.raises(KeyError, match="dummy"):
+        DETECTORS.create("yolo_does_not_exist")

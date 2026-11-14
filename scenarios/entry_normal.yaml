@@ -1,0 +1,11 @@
+# S1: normal entry. Car drives in, driver gets out and leaves.
+fps: 15
+timeline:
+  - { from: 0.0, to: 2.0,  objects: [] }               # empty bay
+  - { from: 2.0, to: 5.0,  objects: [car] }            # car enters
+  - { from: 5.0, to: 9.0,  objects: [car, person] }    # driver gets out
+  - { from: 9.0, to: 15.0, objects: [car] }            # driver has left
+expect:
+  - { at: 7.0,  safe: false }   # person present
+  - { at: 10.0, safe: false }   # still verifying (clear_time_s = 3)
+  - { at: 14.0, safe: true }    # 9.0 + 3 s clear
