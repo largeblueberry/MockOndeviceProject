@@ -65,7 +65,7 @@ flowchart BT
         fsmpkg["safety/<br/>fsm · roi · health"]
         simpl["sources/<br/>dummy · webcam · video · scenario"]
         mimpl["detectors/<br/>dummy · yolo_onnx"]
-        oimpl["outputs/<br/>console · viewer"]
+        oimpl["outputs/<br/>console · viewer · serial_out · mock_mcu<br/>(+ protocol)"]
     end
 
     subgraph L2["③ 조립"]
@@ -137,9 +137,16 @@ src/psafe/
 ├── outputs/             ② 결과 출력            send(Decision)
 │   ├── output_api.py 🔓 Output 인터페이스, OUTPUTS 레지스트리
 │   ├── console.py       로그 출력
-│   └── viewer.py        화면 표시 및 녹화
+│   ├── viewer.py        화면 표시 및 녹화
+│   ├── protocol.py      RPi → ESP32 패킷 v1 (인코딩, CRC-8, 수신 로직)
+│   ├── serial_out.py    USB 시리얼로 ESP32에 송신
+│   └── mock_mcu.py      가짜 ESP32 (같은 수신 로직)
 │
-└── tools/camcheck.py    카메라 측정 도구 (파이프라인과 독립)
+└── tools/
+    ├── camcheck.py      카메라 측정 도구 (파이프라인과 독립)
+    └── mcucheck.py      ESP32 펌웨어 점검 도구 (파이프라인과 독립)
+
+firmware/esp32/psafe_gate/psafe_gate.ino   ESP32 펌웨어 (Arduino)
 ```
 
 ---
@@ -227,7 +234,7 @@ sequenceDiagram
 |---|---|---|
 | `source.name` | `SOURCES` (`sources/source_api.py`) | `dummy`, `webcam`, `video` |
 | `model.name` | `DETECTORS` (`detectors/detector_api.py`) | `dummy`, `yolo_onnx` |
-| `outputs[].name` | `OUTPUTS` (`outputs/output_api.py`) | `console`, `viewer` |
+| `outputs[].name` | `OUTPUTS` (`outputs/output_api.py`) | `console`, `viewer`, `serial`, `mock_mcu` |
 | `fsm`, `health`, `runner` | 해당 없음 (고정 클래스) | `core/config.py`의 `FsmConfig` 등 |
 
 ### 3.3 의존성 주입

@@ -14,7 +14,8 @@
 | [`docs/RESEARCH.md`](docs/RESEARCH.md) | 문제의 근거(사고 통계·사례·제도), 기존 방법과 비교, 아이디어 확장 방향 | 주제 배경을 파악할 때 |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | 설계 원칙, 아키텍처, 데이터 계약, FSM, HW 구성, 통신 프로토콜, 기술 스택 | 설계 의도를 확인할 때 |
 | [`docs/CODE_GUIDE.md`](docs/CODE_GUIDE.md) | 파일 간 연결 관계, 실행 흐름, 주요 설계 패턴, 권장 읽기 순서 | 코드 구조를 처음 볼 때 |
-| [`docs/PROGRESS.md`](docs/PROGRESS.md) | 구현 현황, 실험 결과, 다음 작업 | 현재 진행 상황을 확인할 때 |
+| [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) | 엣지 케이스 목록(미해결·해결), 실험 기록과 예정 실험 | 알려진 한계와 실측 결과를 확인할 때 |
+| [`docs/PROGRESS.md`](docs/PROGRESS.md) | 구현 현황, 다음 작업 | 현재 진행 상황을 확인할 때 |
 
 처음 보는 경우 **RESEARCH → DESIGN → CODE_GUIDE** 순서로 읽는다.
 
@@ -87,6 +88,7 @@ bootcampProject/
 ├── scenarios/         가상 시나리오 정의 (YAML)
 ├── src/psafe/         소스 코드
 ├── tests/             단위 · 통합 테스트
+├── firmware/esp32/    ESP32 펌웨어 (Arduino)
 ├── models/            ONNX 모델 파일 (git 제외)
 └── pyproject.toml     패키지 정의
 ```
@@ -107,7 +109,7 @@ bootcampProject/
 
 ```powershell
 py -3.11 -m venv .venv
-.venv\Scripts\pip install -e ".[dev,onnx]"
+.venv\Scripts\pip install -e ".[dev,onnx,serial]"
 ```
 
 YOLO 모델(`models/yolo11n_320.onnx` 등)은 저장소에 포함되지 않는다. 준비 방법은 [`docs/DESIGN.md`](docs/DESIGN.md) §14.1을 참고한다. 가상 입력(`default.yaml`)은 모델 없이 실행된다.
@@ -119,7 +121,12 @@ YOLO 모델(`models/yolo11n_320.onnx` 등)은 저장소에 포함되지 않는�
 .venv\Scripts\python -m psafe --scenario "scenarios/*.yaml" --check    # 전체 시나리오 검증
 .venv\Scripts\python -m psafe --config config/webcam_yolo.yaml         # 웹캠 + YOLO 실시간
 .venv\Scripts\python -m psafe.tools.camcheck                           # 카메라 측정
+.venv\Scripts\python -m psafe.tools.mcucheck --list                    # 시리얼 포트 목록
+.venv\Scripts\python -m psafe.tools.mcucheck --port COM5               # ESP32 펌웨어 점검
+.venv\Scripts\python -m psafe --config config/serial_dummy.yaml        # 가상 판단 → ESP32
 ```
+
+ESP32 펌웨어(`firmware/esp32/psafe_gate/`)는 PlatformIO(`pio run -t upload`, 폴더의 `platformio.ini` 사용) 또는 Arduino IDE로 업로드한다. 프로토콜은 [`docs/DESIGN.md`](docs/DESIGN.md) §7.3을 참고한다.
 
 | 옵션 | 설명 |
 |---|---|
@@ -149,9 +156,10 @@ YOLO 모델(`models/yolo11n_320.onnx` 등)은 저장소에 포함되지 않는�
 | M3 | FSM · ROI · 카메라 이상 감지, 시나리오 자동 검증 | 완료 |
 | M3.5 | ThreadedRunner (capture / worker / heartbeat) | 완료 |
 | M4 | YOLO ONNX 연결, 웹캠 · 영상 입력 | 진행 중 |
-| M5 | Raspberry Pi 이식, ESP32 연결 | 예정 |
+| M4.5 | 시리얼 출력, 프로토콜 v1, MockMCU, ESP32 펌웨어, 점검 도구 | 완료 (실기 검증 EXP-006) |
+| M5 | Raspberry Pi 이식, 카메라, RPi ↔ ESP32 연결 | 예정 |
 
-실험 결과와 다음 작업은 [`docs/PROGRESS.md`](docs/PROGRESS.md) §2~4, 미결 사항은 [`docs/DESIGN.md`](docs/DESIGN.md) §15를 참고한다.
+다음 작업은 [`docs/PROGRESS.md`](docs/PROGRESS.md) §4, 실험 결과와 알려진 한계는 [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md), 미결 사항은 [`docs/DESIGN.md`](docs/DESIGN.md) §15를 참고한다.
 
 ---
 

@@ -1,0 +1,27 @@
+# 가상 시나리오 판단을 실제 ESP32로 보낸다 (카메라·모델 불필요).
+#   python -m psafe --config config/serial_dummy.yaml
+# 먼저 port를 실제 포트로 바꾼다: python -m psafe.tools.mcucheck --list
+# 시나리오(entry_normal)를 반복 재생하므로 Ctrl+C로 종료한다.
+
+source:
+  name: dummy
+  options:
+    scenario: scenarios/entry_normal.yaml
+    width: 320
+    height: 240
+    loop: true
+
+model:
+  name: dummy
+  options: {}
+
+outputs:
+  - name: console
+  - name: serial
+    options: { port: COM7, baud: 115200 }
+
+runner:
+  mode: threaded
+  heartbeat_ms: 200
+  max_decision_age_ms: 600
+  metrics_interval_s: 5

@@ -286,15 +286,29 @@ python -m psafe --scenario "scenarios/*.yaml" --check     # 전체 시나리오 
 - 통신 속도: 115200 bps (기본값으로 충분 — 우리 패킷은 수십 바이트)
 - PC 개발 단계: `MockMCU` (같은 프로토콜을 흉내내는 가짜 ESP32)로 대체
 
-### 7.3 통신 프로토콜 (초안)
-RPi → ESP32, **주기 200ms** (Decision이 바뀌지 않아도 계속 송신 = 하트비트 겸용)
+### 7.3 통신 프로토콜 (v1, 2026-11-16 확정)
+RPi → ESP32, **주기 200ms** (Decision이 바뀌지 않아도 계속 송신 = 하트비트 겸용). USB 시리얼 115200 bps, 8N1.
 
 ```
 | STX(0xAA) | SEQ(1B) | STATE(1B) | SAFE(1B: 'Y'/'N') | CRC8(1B) |
 ```
-- ESP32: **500ms 동안 유효 패킷 없음 → 강제 N**
-- CRC 오류 패킷은 무시 (무시가 누적되면 결국 타임아웃 → N)
-- ESP32 → RPi ACK는 MVP 범위 밖 (확장 항목)
+
+| 필드 | 값 |
+|---|---|
+| STX | `0xAA` (패킷 시작) |
+| SEQ | 송신할 때마다 1씩 증가, 255 다음은 0 |
+| STATE | `INIT=0`, `OCCUPIED=1`, `VERIFYING=2`, `CLEAR=3`, `FAULT=4` |
+| SAFE | `'Y'`(0x59) 또는 `'N'`(0x4E). `'Y'`는 STATE가 `CLEAR`일 때만 유효 |
+| CRC8 | SEQ·STATE·SAFE 3바이트에 대한 CRC-8. 다항식 `0x07`, 초기값 `0x00`, 반사 없음 (검사값: `"123456789"` → `0xF4`) |
+
+수신 규칙 (ESP32):
+- 최근 5바이트를 밀어 가며 본다(슬라이딩 윈도). 첫 바이트가 STX이고 CRC가 맞으면 패킷으로 인정한다. 바이트가 쪼개져 오거나 중간부터 들어와도 다시 맞춰진다.
+- **무시하는 패킷:** CRC 오류, 규칙 위반(STATE 범위 밖, `CLEAR`가 아닌데 `'Y'`), 직전과 같은 SEQ(같은 패킷 반복은 새 정보가 아님).
+- **500ms 동안 유효 패킷 없음 → 강제 N.** 무시가 누적되어도 결국 이 규칙으로 N이 된다.
+- 부팅 직후는 항상 N.
+- ESP32 → RPi: 상태 보고용 텍스트 줄(`BOOT`, `GATE`, `STAT`)을 같은 시리얼로 보낸다. 판단에는 쓰지 않는다. RPi `serial_out`은 이 줄을 읽어 로그로 남기고(관문 상태와 마지막 송신 판단을 나란히 기록), 점검 도구(`tools/mcucheck.py`)는 이 줄로 동작을 판정한다. ACK는 MVP 범위 밖 (확장 항목).
+
+구현: RPi `src/psafe/outputs/protocol.py`(인코딩·수신 로직), ESP32 `firmware/esp32/psafe_gate/psafe_gate.ino`. **두 파일의 상수는 항상 같아야 한다.**
 
 ---
 
@@ -404,10 +418,10 @@ bootcampProject/
 │   ├── sources/           # source_api(인터페이스), dummy, video, webcam, picamera
 │   ├── detectors/         # detector_api(인터페이스), dummy, yolo_onnx (전처리 포함)
 │   ├── safety/            # fsm(상태 머신), roi, health (순수 로직)
-│   ├── outputs/           # output_api(인터페이스), console, serial(ESP32), mock_mcu, protocol(패킷 인코딩)
+│   ├── outputs/           # output_api(인터페이스), console, viewer, serial_out(ESP32), mock_mcu, protocol(패킷 인코딩)
 │   ├── runners.py         # ThreadedRunner, SyncRunner
 │   └── __main__.py        # python -m psafe --config config/default.yaml
-├── firmware/esp32/        # ESP32 펌웨어 (워치독 + 출력)
+├── firmware/esp32/psafe_gate/  # ESP32 펌웨어 (패킷 수신 + 워치독 + 출력)
 └── tests/                 # 시나리오 기반 테스트
 ```
 
@@ -440,7 +454,8 @@ bootcampProject/
 | M3 | 주말 | FSM + ROI + Console 출력 | S1~S6 기대 결과 자동 검증 통과 |
 | M3.5 | 주말 | ThreadedRunner (capture / worker / heartbeat + supervisor) | 9개 시나리오 실시간 모드 통과 (`pytest -m slow`) |
 | M4 | 주말~월 | 실제 모델(YOLO ONNX) PC에서 연결, 영상/웹캠 입력 | 모델 이름만 바꿔 교체 동작 |
-| M5 | 월 (HW 수령 후) | RPi 이식, 카메라, 속도 측정, ESP32 연결 | RPi에서 end-to-end Y/N |
+| M4.5 | 월 | 시리얼 출력 + 프로토콜 v1 + MockMCU + ESP32 펌웨어 + 점검 도구 | `mcucheck` 7/7 통과 (실기) — 2026-11-16 완료 |
+| M5 | M4.5 이후 | RPi 이식, 카메라, 속도 측정, RPi ↔ ESP32 연결 | RPi에서 end-to-end Y/N |
 
 > M1~M3는 **HW·모델 없이** 진행 가능. 시스템의 뼈대(판단 로직·안전 정책)를 먼저 검증하고, 모델은 나중에 끼운다.
 
