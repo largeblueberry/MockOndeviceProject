@@ -1,7 +1,7 @@
-"""WebcamSource: USB/laptop camera through OpenCV.
+"""WebcamSource: OpenCV로 USB/노트북 카메라를 읽는다.
 
-On the Raspberry Pi CSI camera, use a picamera2-based source instead
-(Bookworm's libcamera stack is not reachable through cv2.VideoCapture).
+라즈베리파이 CSI 카메라에는 picamera2 기반 Source를 대신 써야 한다
+(Bookworm의 libcamera 스택은 cv2.VideoCapture로 접근할 수 없다).
 """
 
 import logging
@@ -26,7 +26,7 @@ class WebcamSource(Source):
         height: int = 480,
         fps: float = 30,
         mirror: bool = False,
-        max_failures: int = 10,      # consecutive failed reads before giving up
+        max_failures: int = 10,      # 연속으로 이만큼 읽기에 실패하면 포기
         source_id: str = "webcam",
     ):
         if isinstance(clock, FakeClock):
@@ -39,7 +39,7 @@ class WebcamSource(Source):
         self._seq = 0
 
     def open(self) -> None:
-        # DirectShow opens much faster than the default MSMF backend on Windows.
+        # Windows에서는 DirectShow가 기본 MSMF 백엔드보다 훨씬 빨리 열린다.
         api = cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY
         cap = cv2.VideoCapture(self.index, api)
         if not cap.isOpened():
@@ -47,7 +47,7 @@ class WebcamSource(Source):
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         cap.set(cv2.CAP_PROP_FPS, self.fps)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # keep the driver queue short (not all backends obey)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # 드라이버 큐를 짧게 유지 (모든 백엔드가 따르지는 않음)
         self._cap = cap
         self._seq = 0
         log.info("webcam %d opened: %dx%d @ %.0f fps", self.index,
@@ -62,9 +62,9 @@ class WebcamSource(Source):
             log.warning("webcam read failed (%d/%d)", attempt + 1, self.max_failures)
             self.clock.sleep(0.05)
         else:
-            return None  # camera gone: runner sees end of stream and stops (N)
-        # read() blocks until a new frame arrives, so "now" ~= capture time
-        # (+ USB transfer). Good enough for staleness checks at 100s of ms.
+            return None  # 카메라 사라짐: Runner가 스트림 종료로 보고 멈춘다 (N)
+        # read()는 새 프레임이 올 때까지 대기하므로 "now" ~= 촬영 시각
+        # (+ USB 전송 시간). 수백 ms 단위의 오래됨 검사에는 충분하다.
         ts = self.clock.now()
         if self.mirror:
             img = cv2.flip(img, 1)

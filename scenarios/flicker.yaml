@@ -10,5 +10,5 @@ expect:
   - { at: 3.0,  safe: false }
   - { at: 6.0,  safe: false }
   - { at: 9.5,  safe: false }
-  - { at: 12.0, safe: false }   # clear since ~10.0, not 3 s yet
+  - { at: 12.0, safe: false }   # ~10.0부터 비어 있음, 아직 3초 안 됨
   - { at: 14.0, safe: true }

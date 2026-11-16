@@ -1,11 +1,11 @@
-"""config.yaml -> typed dataclasses (DESIGN.md §9).
+"""config.yaml -> 타입이 있는 dataclass (DESIGN.md §9).
 
-Pluggable parts (source / model / outputs) are `name + options`; the options
-dict is passed straight to the chosen class's constructor, so adding a new
-implementation never requires touching this file.
-Core settings (fsm / health / runner) are typed and validated here.
-Unknown keys are errors: a typo like `clear_tme_s` must not silently fall back
-to a default in a safety system.
+교체 가능한 부품(source / model / outputs)은 `name + options` 형태다. options
+dict는 선택된 클래스의 생성자로 그대로 전달되므로, 새 구현체를 추가해도 이
+파일은 고칠 필요가 없다.
+핵심 설정(fsm / health / runner)은 여기서 타입을 정하고 검증한다.
+알 수 없는 키는 오류다. 안전 시스템에서 `clear_tme_s` 같은 오타가 조용히
+기본값으로 대체되어서는 안 된다.
 """
 
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -37,15 +37,15 @@ class FsmConfig:
 class HealthConfig:
     min_brightness: float = 10.0
     max_brightness: float = 245.0
-    freeze_diff_threshold: float = 0.5   # mean abs pixel diff below this = "same frame"
-    freeze_frames: int = 1               # consecutive same frames before FAULT (1 = strictest)
+    freeze_diff_threshold: float = 0.5   # 픽셀 평균 절대 차이가 이 값 미만이면 "같은 프레임"
+    freeze_frames: int = 1               # 같은 프레임이 몇 장 연속이면 FAULT (1 = 가장 엄격)
     max_decision_age_ms: float = 600.0
 
 
 @dataclass
 class RunnerConfig:
     mode: str = "sync"            # sync | threaded
-    clock: str = "auto"           # auto | real | fake  (auto: fake for sync, real for threaded)
+    clock: str = "auto"           # auto | real | fake  (auto: sync면 fake, threaded면 real)
     heartbeat_ms: float = 200.0
     metrics_interval_s: float = 5.0
 
@@ -85,7 +85,7 @@ def _build(cls: type, data: Any, path: str) -> Any:
             kwargs[name] = value
     try:
         return cls(**kwargs)
-    except TypeError as e:  # missing required field
+    except TypeError as e:  # 필수 필드 누락
         raise ConfigError(f"{path}: {e}") from None
 
 

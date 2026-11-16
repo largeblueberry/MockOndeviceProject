@@ -1,9 +1,8 @@
-"""ViewerOutput: live window + optional annotated recording. Also the demo screen.
+"""ViewerOutput: 실시간 창 + 선택적 주석 녹화. 시연 화면으로도 쓴다.
 
-Draws ROI, detections (red = person in ROI, orange = person outside,
-grey = other classes) and a Y/N banner. The banner shows the HEARTBEAT
-decision (what the ESP32 receives), which can differ from the per-frame
-decision when the worker is stuck - exactly what you want to see in a demo.
+ROI, 검출 결과(빨강 = ROI 안의 사람, 주황 = ROI 밖의 사람, 회색 = 다른 클래스),
+Y/N 배너를 그린다. 배너는 하트비트 판단(ESP32가 받는 값)을 보여 준다. worker가
+멈추면 프레임별 판단과 달라질 수 있는데, 시연에서 보여 주고 싶은 것이 바로 이 점이다.
 """
 
 import logging
@@ -61,7 +60,7 @@ class ViewerOutput(Output):
         person_conf_low: float = 0.0,
         show: bool = True,
         window: str = "psafe",
-        record_path: str | None = None,   # e.g. recordings/run.mp4 (annotated)
+        record_path: str | None = None,   # 예: recordings/run.mp4 (주석 포함)
         record_fps: float = 15.0,
         scale: float = 1.0,
     ):
@@ -71,7 +70,7 @@ class ViewerOutput(Output):
         self.record_path, self.record_fps = record_path, record_fps
         self.scale = scale
         self._lock = threading.Lock()
-        self._frame: np.ndarray | None = None     # latest annotated frame (from worker)
+        self._frame: np.ndarray | None = None     # 주석을 그린 최신 프레임 (worker가 씀)
         self._fresh = False
         self._heartbeat: Decision | None = None
         self._writer: cv2.VideoWriter | None = None
@@ -98,10 +97,10 @@ class ViewerOutput(Output):
         if frame is not None and (fresh or hb is not None):
             shown = frame.copy()
             if hb is not None:
-                draw_banner(shown, hb)  # what the ESP32 actually gets right now
+                draw_banner(shown, hb)  # 지금 ESP32가 실제로 받는 값
             cv2.imshow(self.window, shown)
         key = cv2.waitKey(1) & 0xFF
-        return key not in (ord("q"), 27)  # q / Esc -> stop
+        return key not in (ord("q"), 27)  # q / Esc -> 종료
 
     def _record(self, frame: np.ndarray) -> None:
         if self._writer is None:

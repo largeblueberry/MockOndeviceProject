@@ -16,7 +16,7 @@ def test_get_returns_latest_and_counts_drops():
     for i in range(5):
         s.put(Item(i))
     assert s.get(timeout=0).seq == 4
-    assert s.dropped == 4          # 0..3 overwritten unread
+    assert s.dropped == 4          # 0..3은 읽히지 않고 덮어쓰임
 
 
 def test_get_does_not_return_same_item_twice():

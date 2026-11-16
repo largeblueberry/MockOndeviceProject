@@ -1,4 +1,4 @@
-"""DummyDetector noise and DummySource camera behaviour."""
+"""DummyDetector 노이즈와 DummySource 카메라 동작."""
 
 import numpy as np
 import pytest
@@ -19,7 +19,7 @@ def persons(dets):
     return sum(o.cls == "person" for o in dets.objects)
 
 
-# ---- detector -------------------------------------------------------------
+# ---- 검출기 -------------------------------------------------------------
 
 def test_no_noise_reports_ground_truth():
     clock = FakeClock()
@@ -59,10 +59,10 @@ def test_latency_advances_fake_clock_and_source_skips_frames():
         det.predict(f)
         seqs.append(f.seq)
         ages.append(clock.now() - f.timestamp)
-    # 10 fps, 250 ms per inference. At t=0.25 the newest captured frame is #2 (t=0.2), etc.
+    # 10 fps, 추론 1회 250 ms. t=0.25에서 가장 최근에 촬영된 프레임은 #2 (t=0.2), 이하 같음.
     assert seqs == [0, 2, 5, 7, 10]
     assert src.skipped == 6
-    # Age at decision time = wait for capture + inference. Must reflect the real capture time.
+    # 판단 시점의 프레임 나이 = 촬영 대기 + 추론. 실제 촬영 시각을 반영해야 한다.
     assert ages == pytest.approx([0.25, 0.30, 0.25, 0.30, 0.25])
 
 
@@ -71,7 +71,7 @@ def test_invalid_rates_rejected():
         DummyDetector(FakeClock(), miss_rate=1.5)
 
 
-# ---- source camera modes ---------------------------------------------------
+# ---- Source 카메라 모드 ---------------------------------------------------
 
 def test_noise_makes_static_frames_differ():
     src = DummySource(FakeClock(), PERSON_10S, 32, 24)

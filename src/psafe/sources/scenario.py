@@ -1,7 +1,7 @@
-"""Scenario files: scripted timelines for DummySource (DESIGN.md §6.1).
+"""시나리오 파일: DummySource용 타임라인 대본 (DESIGN.md §6.1).
 
     fps: 15
-    config:                      # optional overrides merged into the base config
+    config:                      # 선택. 기본 설정 위에 병합되는 덮어쓰기 값
       model: { options: { miss_rate: 0.3 } }
     timeline:
       - { from: 0, to: 2, objects: [] }
@@ -10,14 +10,14 @@
     expect:
       - { at: 4.0, safe: false }
 
-`objects` is what is really in the bay (the world). `camera` says what the
-camera does meanwhile:
-    ok       normal frames (default)
-    outage   no frames at all (cable pulled, driver crash)
-    blackout black frames (lens covered) -> model sees nothing
-    freeze   last frame repeated (driver stuck) -> model sees the old scene
-blackout/freeze are the dangerous ones: the world has a person, the model
-says "empty". Only health checks (M3) can catch them.
+`objects`는 구역에 실제로 있는 것(world)이다. `camera`는 그동안 카메라가 어떻게
+동작하는지를 나타낸다:
+    ok       정상 프레임 (기본값)
+    outage   프레임이 아예 없음 (케이블 분리, 드라이버 오류)
+    blackout 검은 프레임 (렌즈 가림) -> 모델은 아무것도 못 본다
+    freeze   마지막 프레임 반복 (드라이버 멈춤) -> 모델은 예전 장면을 본다
+위험한 것은 blackout/freeze다: 실제로는 사람이 있는데 모델은 "비어 있음"이라고
+답한다. health 검사(M3)만이 이를 잡을 수 있다.
 """
 
 from dataclasses import dataclass, field
@@ -28,7 +28,7 @@ import yaml
 
 from psafe.core.packets import BBox, Detection
 
-# Where an object appears when the scenario doesn't give a bbox.
+# 시나리오에 bbox가 없을 때 객체가 나타나는 기본 위치.
 DEFAULT_BBOX: dict[str, BBox] = {
     "car": (0.20, 0.35, 0.80, 0.85),
     "person": (0.40, 0.30, 0.55, 0.80),
@@ -68,7 +68,7 @@ class Scenario:
         for s in self.segments:
             if s.start <= t < s.end:
                 return s
-        return None  # gap in the timeline = empty scene, camera ok
+        return None  # 타임라인의 빈 구간 = 빈 장면, 카메라 정상
 
     def objects_at(self, t: float) -> tuple[Detection, ...]:
         seg = self.segment_at(t)

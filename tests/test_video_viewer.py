@@ -13,7 +13,7 @@ FPS, N = 10, 20
 
 @pytest.fixture
 def clip(tmp_path):
-    """20-frame MJPG clip; frame i has brightness 10*i so frames are identifiable."""
+    """20프레임 MJPG 영상. i번 프레임의 밝기는 10*i라서 프레임을 구분할 수 있다."""
     path = str(tmp_path / "clip.avi")
     w = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"MJPG"), FPS, (64, 48))
     assert w.isOpened()
@@ -45,8 +45,8 @@ def test_slow_consumer_gets_latest_frame(clip):
     for _ in range(4):
         f = src.read()
         got.append((f.seq, level(f)))
-        clock.advance(0.25)                     # 250 ms "inference"
-    assert got == [(0, 0), (2, 2), (5, 5), (7, 7)]   # decoded content matches seq
+        clock.advance(0.25)                     # 250 ms "추론"
+    assert got == [(0, 0), (2, 2), (5, 5), (7, 7)]   # 디코딩한 내용이 seq와 일치
     assert src.skipped == 4
 
 
@@ -71,7 +71,7 @@ def test_annotate_and_record(tmp_path):
 
     out = annotate(img, Roi(roi), dets, dec)
     assert out.shape == img.shape and not np.array_equal(out, img)
-    assert (img == 90).all()                                  # input untouched
+    assert (img == 90).all()                                  # 입력은 변경되지 않음
 
     path = str(tmp_path / "rec.avi")
     v = ViewerOutput(roi, show=False, record_path=path)

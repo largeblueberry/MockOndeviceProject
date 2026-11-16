@@ -1,8 +1,8 @@
-"""python -m psafe                                          (config/default.yaml)
-python -m psafe --mode threaded                          (real time, 3 threads; Ctrl+C to stop)
+"""python -m psafe                                          (config/default.yaml 사용)
+python -m psafe --mode threaded                          (실시간, 3스레드. Ctrl+C로 종료)
 python -m psafe --scenario scenarios/flicker.yaml --check
-python -m psafe --scenario "scenarios/*.yaml" --check    (all scenarios, instant)
-python -m psafe --scenario "scenarios/*.yaml" --check --mode threaded   (all, real time)
+python -m psafe --scenario "scenarios/*.yaml" --check    (전체 시나리오, 즉시 실행)
+python -m psafe --scenario "scenarios/*.yaml" --check --mode threaded   (전체 시나리오, 실시간)
 """
 
 import argparse
@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
             SyncRunner(c, max_frames=args.max_frames).run()
             return 0
         result = ThreadedRunner(c, max_seconds=args.seconds).run()
-    except (FileNotFoundError, RuntimeError) as e:  # model / camera / video failed to open
+    except (FileNotFoundError, RuntimeError) as e:  # 모델 / 카메라 / 영상 열기 실패
         logging.error("startup failed: %s", e)
         return 2
     return 1 if result.error else 0

@@ -1,4 +1,4 @@
-"""ThreadedRunner: real clock, real threads. Each test runs ~1.5-3 s."""
+"""ThreadedRunner: 실제 시계, 실제 스레드. 테스트마다 ~1.5-3초 걸린다."""
 
 import threading
 import time
@@ -34,7 +34,7 @@ def make(seconds=2.0, objects=(), model_opts=None, **runner):
         "fsm": {"clear_time_s": 0.5, "clear_min_frames": 5},
         "runner": {"mode": "threaded", "metrics_interval_s": 60, **runner},
     })
-    cfg.source.options["scenario"] = sc  # pass the object directly, no file needed
+    cfg.source.options["scenario"] = sc  # 객체를 직접 전달, 파일 불필요
     c = build(cfg)
     rec = Recorder()
     c.outputs.append(rec)
@@ -48,22 +48,22 @@ def test_heartbeat_period_and_final_n():
     assert r.error is None
     assert 8 <= r.heartbeats <= 12                      # 2 s / 200 ms
     gaps = [b[0] - a[0] for a, b in zip(rec.sent, rec.sent[1:-1])]
-    assert max(gaps) < 0.3                              # steady cadence
-    assert any(d.safe for _, d in rec.sent)             # empty bay -> Y at some point
+    assert max(gaps) < 0.3                              # 일정한 주기
+    assert any(d.safe for _, d in rec.sent)             # 빈 구역 -> 언젠가 Y
     assert (rec.sent[-1][1].safe, rec.sent[-1][1].reason) == (False, "shutdown")
-    assert r.frames >= 25                               # ~15 fps model
+    assert r.frames >= 25                               # ~15 fps 모델
 
 
 def test_slow_model_drops_frames_but_keeps_deciding():
     c, rec = make(seconds=2.0, model_opts={"latency_ms": 150})
     r = ThreadedRunner(c).run()
-    assert r.dropped > 10                               # capture runs ahead, slot overwrites
-    assert 8 <= r.frames <= 16                          # ~6.7 inferences/s
+    assert r.dropped > 10                               # 캡처가 앞서가고 슬롯이 덮어씀
+    assert 8 <= r.frames <= 16                          # 초당 ~6.7회 추론
     assert r.stale_heartbeats == 0                      # 150 ms < max_decision_age
 
 
 class HangingDetector(DummyDetector):
-    """Works for a few frames, then blocks inside predict() (driver/model hang)."""
+    """몇 프레임은 정상 동작하다가 predict() 안에서 멈춘다 (드라이버/모델 멈춤)."""
 
     def __init__(self, clock, hang_after=10):
         super().__init__(clock)
@@ -114,7 +114,7 @@ def test_worker_crash_stops_run_with_error():
     t0 = time.monotonic()
     r = ThreadedRunner(c).run()
     assert "worker" in (r.error or "")
-    assert time.monotonic() - t0 < 2.0                  # stopped early, didn't run 5 s
+    assert time.monotonic() - t0 < 2.0                  # 일찍 멈춤, 5초를 다 돌지 않음
     assert rec.sent[-1][1].reason == "shutdown"
 
 
@@ -126,7 +126,7 @@ def test_fake_clock_rejected():
         ThreadedRunner(c)
 
 
-# ---- all scenarios in real time (slow: pytest -m slow) ---------------------
+# ---- 전체 시나리오 실시간 실행 (느림: pytest -m slow) ---------------------
 
 @pytest.mark.slow
 @pytest.mark.parametrize("path", sorted(Path("scenarios").glob("*.yaml")), ids=lambda p: p.stem)

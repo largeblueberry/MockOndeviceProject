@@ -1,13 +1,13 @@
-"""YOLO (v8 / 11, Ultralytics export) on ONNX Runtime.
+"""ONNX Runtime으로 돌리는 YOLO (v8 / 11, Ultralytics export).
 
-predict() = letterbox -> ONNX -> decode -> NMS -> normalized bbox -> class map.
-Everything model-specific lives here (DESIGN.md §5.2), so swapping to a
-fine-tuned model is a config change: point `weights` at the new .onnx and,
-if its class is not called "person", map it:  class_map: {minifig: person}
+predict() = letterbox -> ONNX -> decode -> NMS -> bbox 정규화 -> 클래스 매핑.
+모델별 처리는 모두 여기에 있다 (DESIGN.md §5.2). 따라서 파인튜닝한 모델로
+바꾸는 것은 설정 변경만으로 된다: `weights`를 새 .onnx로 지정하고, 클래스
+이름이 "person"이 아니면 매핑한다:  class_map: {minifig: person}
 
-Expected output layout: (1, 4 + num_classes, num_anchors), boxes as
-(cx, cy, w, h) in input-pixel space - what `YOLO(...).export(format="onnx")`
-produces for v8/v11. Other layouts fail loudly at load().
+기대하는 출력 형태: (1, 4 + num_classes, num_anchors), 박스는 입력 픽셀 기준
+(cx, cy, w, h). v8/v11에서 `YOLO(...).export(format="onnx")`가 만드는 형태다.
+다른 형태는 load()에서 명확한 오류로 실패한다.
 """
 
 import ast
@@ -33,11 +33,11 @@ COCO80 = (
 ).split()
 
 
-# ---- pure helpers (unit tested without a model) ----------------------------
+# ---- 순수 함수 (모델 없이 단위 테스트) ----------------------------
 
 def letterbox(img: np.ndarray, size: int, pad_value: int = 114) -> tuple[np.ndarray, float, int, int]:
-    """Resize keeping aspect ratio, pad to size x size.
-    Returns (padded BGR image, scale, pad_x, pad_y)."""
+    """비율을 유지하며 크기를 줄이고 size x size로 여백을 채운다.
+    (여백을 채운 BGR 이미지, 배율, pad_x, pad_y)를 반환한다."""
     h, w = img.shape[:2]
     scale = min(size / w, size / h)
     nw, nh = round(w * scale), round(h * scale)
@@ -49,12 +49,12 @@ def letterbox(img: np.ndarray, size: int, pad_value: int = 114) -> tuple[np.ndar
 
 
 def to_blob(img_bgr: np.ndarray) -> np.ndarray:
-    """BGR uint8 HWC -> RGB float32 NCHW in [0, 1]."""
+    """BGR uint8 HWC -> [0, 1] 범위의 RGB float32 NCHW."""
     return np.ascontiguousarray(img_bgr[:, :, ::-1].transpose(2, 0, 1)[None], dtype=np.float32) / 255.0
 
 
 def nms(boxes: np.ndarray, scores: np.ndarray, iou_thres: float) -> list[int]:
-    """Greedy NMS on xyxy boxes. Returns kept indices, highest score first."""
+    """xyxy 박스에 대한 탐욕적 NMS. 남긴 인덱스를 점수 높은 순으로 반환한다."""
     order = scores.argsort()[::-1]
     x1, y1, x2, y2 = boxes.T
     areas = (x2 - x1).clip(0) * (y2 - y1).clip(0)
@@ -82,7 +82,7 @@ def decode(
     orig_w: int,
     orig_h: int,
 ) -> list[Detection]:
-    """(1, 4+nc, N) raw output -> detections with bbox normalized to the ORIGINAL image."""
+    """(1, 4+nc, N) 원시 출력 -> 원본 이미지 기준으로 bbox를 정규화한 검출 결과."""
     pred = output[0].T                                   # (N, 4+nc)
     scores_all = pred[:, 4:]
     cls = scores_all.argmax(axis=1)
@@ -94,11 +94,11 @@ def decode(
 
     cx, cy, w, h = pred[:, 0], pred[:, 1], pred[:, 2], pred[:, 3]
     boxes = np.stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], axis=1)
-    boxes[:, [0, 2]] = ((boxes[:, [0, 2]] - pad_x) / scale).clip(0, orig_w)   # undo letterbox
+    boxes[:, [0, 2]] = ((boxes[:, [0, 2]] - pad_x) / scale).clip(0, orig_w)   # letterbox 되돌리기
     boxes[:, [1, 3]] = ((boxes[:, [1, 3]] - pad_y) / scale).clip(0, orig_h)
 
     out: list[Detection] = []
-    for c in np.unique(cls):                             # NMS per class
+    for c in np.unique(cls):                             # 클래스별 NMS
         idx = np.where(cls == c)[0]
         for k in nms(boxes[idx], conf[idx], iou_thres):
             x1, y1, x2, y2 = boxes[idx[k]]
@@ -109,7 +109,7 @@ def decode(
 
 
 def names_from_metadata(meta: dict[str, str]) -> list[str] | None:
-    """Ultralytics stores {0: 'person', ...} as a string in the ONNX metadata."""
+    """Ultralytics는 {0: 'person', ...}을 ONNX 메타데이터에 문자열로 저장한다."""
     raw = meta.get("names")
     if not raw:
         return None
@@ -120,18 +120,18 @@ def names_from_metadata(meta: dict[str, str]) -> list[str] | None:
         return None
 
 
-# ---- detector ---------------------------------------------------------------
+# ---- 검출기 ---------------------------------------------------------------
 
 @DETECTORS.register("yolo_onnx")
 class YoloOnnxDetector(Detector):
     def __init__(
         self,
         weights: str,
-        input_size: int | None = None,        # default: read from the model's input shape
-        conf_threshold: float = 0.20,         # keep low; the FSM applies person_conf_low on top
+        input_size: int | None = None,        # 기본값: 모델 입력 형태에서 읽음
+        conf_threshold: float = 0.20,         # 낮게 유지. FSM이 그 위에 person_conf_low를 적용한다
         iou_threshold: float = 0.45,
-        class_map: dict[str, str] | None = None,   # model name -> internal name, e.g. {minifig: person}
-        classes: list[str] | None = None,     # keep only these internal names (None = all)
+        class_map: dict[str, str] | None = None,   # 모델 클래스 이름 -> 내부 이름, 예: {minifig: person}
+        classes: list[str] | None = None,     # 이 내부 이름만 남김 (None = 전부)
         threads: int = 4,
     ):
         self.weights = weights
@@ -144,7 +144,7 @@ class YoloOnnxDetector(Detector):
         self._session = None
 
     def load(self) -> None:
-        import onnxruntime as ort  # imported here so the package works without it
+        import onnxruntime as ort  # 여기서 import해야 onnxruntime 없이도 패키지가 동작한다
         from pathlib import Path
 
         if not Path(self.weights).is_file():
@@ -155,7 +155,7 @@ class YoloOnnxDetector(Detector):
         self._session = sess = ort.InferenceSession(self.weights, so, providers=["CPUExecutionProvider"])
         inp = sess.get_inputs()[0]
         self._input_name = inp.name
-        shape = inp.shape                                      # e.g. [1, 3, 320, 320]
+        shape = inp.shape                                      # 예: [1, 3, 320, 320]
         static = isinstance(shape[2], int) and isinstance(shape[3], int)
         if self.input_size is None:
             if not static:
@@ -181,7 +181,7 @@ class YoloOnnxDetector(Detector):
 
     def predict(self, pkt: FramePacket) -> Detections:
         assert self._session is not None and self.input_size, "load() first"
-        t0 = time.perf_counter()   # measurement only, not used for decisions
+        t0 = time.perf_counter()   # 측정용일 뿐, 판단에는 쓰지 않는다
         img = pkt.image
         h, w = img.shape[:2]
         boxed, scale, px, py = letterbox(img, self.input_size)

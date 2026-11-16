@@ -1,11 +1,11 @@
 description: "S1 normal entry: car drives in, driver gets out and leaves"
 fps: 15
 timeline:
-  - { from: 0.0, to: 2.0,  objects: [] }               # empty bay
-  - { from: 2.0, to: 5.0,  objects: [car] }            # car enters
-  - { from: 5.0, to: 9.0,  objects: [car, person] }    # driver gets out
-  - { from: 9.0, to: 15.0, objects: [car] }            # driver has left
+  - { from: 0.0, to: 2.0,  objects: [] }               # 빈 구역
+  - { from: 2.0, to: 5.0,  objects: [car] }            # 차 진입
+  - { from: 5.0, to: 9.0,  objects: [car, person] }    # 운전자 하차
+  - { from: 9.0, to: 15.0, objects: [car] }            # 운전자 퇴장
 expect:
-  - { at: 7.0,  safe: false }   # person present
-  - { at: 10.0, safe: false }   # still verifying (clear_time_s = 3)
-  - { at: 14.0, safe: true }    # 9.0 + 3 s clear
+  - { at: 7.0,  safe: false }   # 사람 있음
+  - { at: 10.0, safe: false }   # 아직 검증 중 (clear_time_s = 3)
+  - { at: 14.0, safe: true }    # 9.0 + 3초 비어 있음

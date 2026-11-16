@@ -1,19 +1,19 @@
-"""Safety FSM (DESIGN.md §8). Pure logic: no I/O, time is passed in.
+"""안전 FSM (DESIGN.md §8). 순수 로직: 입출력 없음, 시간은 인자로 받는다.
 
     INIT ──person──► OCCUPIED ◄──person── VERIFYING ──T s & N frames clear──► CLEAR
       └──no person──────────────────────────►┘ ▲                              │
                                                └────────── person ────────────┘ (→ OCCUPIED)
     any state ──fault──► FAULT ──K healthy frames──► VERIFYING   (person → OCCUPIED)
 
-Rules (asymmetric on purpose):
-  * One frame with a person in the ROI -> N immediately.
-  * Y only after clear_time_s AND clear_min_frames of continuous "no person".
-    Both: at low FPS, time alone could pass with only 2-3 frames looked at.
-  * Any doubt about the input (stale frame, camera fault, no frames,
-    detector error) -> FAULT (N). Leaving FAULT always goes through VERIFYING,
-    never straight to CLEAR.
-  * Clear time is measured on frame capture timestamps: it is "seconds the
-    camera saw an empty bay", not "seconds the CPU spent".
+규칙 (의도적으로 비대칭):
+  * ROI 안에 사람이 있는 프레임이 1장이라도 나오면 즉시 N.
+  * Y는 "사람 없음"이 clear_time_s 동안, 그리고 clear_min_frames장 연속될 때만.
+    둘 다 보는 이유: FPS가 낮으면 시간 조건만으로는 2~3장만 보고 통과할 수 있다.
+  * 입력이 조금이라도 의심스러우면 (오래된 프레임, 카메라 이상, 프레임 없음,
+    검출기 오류) FAULT (N). FAULT를 벗어날 때는 항상 VERIFYING을 거치며,
+    CLEAR로 바로 가지 않는다.
+  * 비어 있는 시간은 프레임 촬영 시각으로 잰다. "CPU가 쓴 시간"이 아니라
+    "카메라가 빈 구역을 본 시간"이다.
 """
 
 import logging
@@ -24,9 +24,9 @@ from psafe.fsm.roi import Roi
 
 log = logging.getLogger("psafe.fsm")
 
-# Float timestamps: 2.8 - 1.8 == 0.9999999999999998. Without a tolerance the
-# clear timer would pass or not depending on rounding. 1 us is far below any
-# frame interval, so this never makes a decision meaningfully less safe.
+# 실수 시각: 2.8 - 1.8 == 0.9999999999999998. 허용 오차가 없으면 반올림에 따라
+# 비어 있음 타이머의 통과 여부가 달라진다. 1 us는 어떤 프레임 간격보다도 훨씬
+# 작으므로, 이 오차 때문에 판단이 의미 있게 덜 안전해지지는 않는다.
 TIME_EPS = 1e-6
 
 
@@ -38,14 +38,14 @@ class SafetyFSM:
         self.state = State.INIT
         self._last_seq = -1
         self._last_ts = float("-inf")
-        self._clear_since = 0.0      # frame timestamp when the bay was first seen empty
+        self._clear_since = 0.0      # 구역이 처음 비어 보인 프레임의 시각
         self._clear_frames = 0
         self._recover_frames = 0
 
-    # ---- inputs ------------------------------------------------------------
+    # ---- 입력 ------------------------------------------------------------
 
     def step(self, dets: Detections, now: float, fault: str | None = None) -> Decision:
-        """One processed frame. `fault` comes from the health monitor (None = healthy)."""
+        """처리된 프레임 1장. `fault`는 HealthMonitor 결과 (None = 정상)."""
         fault = fault or self._input_fault(dets, now)
         self._last_seq, self._last_ts = max(self._last_seq, dets.seq), max(self._last_ts, dets.timestamp)
         if fault:
@@ -71,19 +71,19 @@ class SafetyFSM:
                 return self._go(State.CLEAR, True, "clear", now, dets)
             return self._go(State.VERIFYING, False, "verifying", now, dets)
 
-        return self._go(State.CLEAR, True, "clear", now, dets)  # CLEAR stays CLEAR
+        return self._go(State.CLEAR, True, "clear", now, dets)  # CLEAR는 CLEAR 유지
 
     def fault(self, reason: str, now: float, dets: Detections | None = None) -> Decision:
-        """Enter FAULT for any reason. Also used by runners (detector crash, etc.)."""
+        """어떤 사유로든 FAULT로 들어간다. Runner도 사용한다 (검출기 오류 등)."""
         self._recover_frames = 0
         self._clear_frames = 0
         return self._go(State.FAULT, False, reason, now, dets)
 
     def on_no_frame(self, now: float) -> Decision:
-        """The worker waited max_frame_age_ms without receiving a frame."""
+        """worker가 max_frame_age_ms 동안 프레임을 받지 못했다."""
         return self.fault("no_frame", now)
 
-    # ---- helpers -----------------------------------------------------------
+    # ---- 내부 함수 -----------------------------------------------------------
 
     def _input_fault(self, dets: Detections, now: float) -> str | None:
         if dets.seq <= self._last_seq or dets.timestamp < self._last_ts:

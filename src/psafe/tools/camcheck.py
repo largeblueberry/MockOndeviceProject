@@ -1,15 +1,14 @@
-"""Camera check + clip recorder. No model, no decisions - just the camera.
+"""카메라 점검 + 영상 녹화. 모델도 판단도 없이 카메라만 본다.
 
-    python -m psafe.tools.camcheck                       # live view + stats
+    python -m psafe.tools.camcheck                       # 실시간 화면 + 통계
     python -m psafe.tools.camcheck --record recordings/empty_bay.mp4
 
-Prints what the health checks will see on THIS camera, so the thresholds in
-config.yaml (health.min_brightness, freeze_diff_threshold) can be set from
-measurements instead of guesses:
-    brightness  mean gray level (0..255)
-    diff        mean abs difference to the previous frame (sensor noise level
-                in a static scene; must stay above freeze_diff_threshold)
-Keys: r = start/stop recording, q / Esc = quit.
+health 검사가 이 카메라에서 보게 될 값을 출력한다. config.yaml의 임계값
+(health.min_brightness, freeze_diff_threshold)을 추측이 아닌 측정값으로 정하기 위함이다:
+    brightness  평균 밝기 (0..255)
+    diff        직전 프레임과의 평균 절대 차이 (정적인 장면에서의 센서 노이즈
+                수준. freeze_diff_threshold보다 커야 한다)
+키: r = 녹화 시작/정지, q / Esc = 종료.
 """
 
 import argparse
@@ -48,7 +47,7 @@ def main() -> int:
             if not ok:
                 print("read failed")
                 break
-            small = img[::4, ::4].astype(np.float32).mean(axis=2)  # same as HealthMonitor
+            small = img[::4, ::4].astype(np.float32).mean(axis=2)  # HealthMonitor와 같은 방식
             bright = float(small.mean())
             diff = float(np.abs(small - prev).mean()) if prev is not None else float("nan")
             prev = small
@@ -69,7 +68,7 @@ def main() -> int:
                 writer = cv2.VideoWriter(rec_path, cv2.VideoWriter_fourcc(*"mp4v"), args.fps, (w, h))
                 print(f"recording -> {rec_path}")
             if writer is not None:
-                writer.write(img)  # raw frames, no overlay: this is test input
+                writer.write(img)  # 주석 없는 원본 프레임: 테스트 입력으로 쓴다
 
             view = img.copy()
             label = f"{fps:.0f} fps  bright {bright:.0f}  diff {diff:.2f}" + ("  REC" if writer else "")

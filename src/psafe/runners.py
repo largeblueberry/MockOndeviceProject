@@ -1,10 +1,9 @@
-"""Runners drive the components (DESIGN.md §3.1, §3.4).
+"""Runner는 부품을 구동한다 (DESIGN.md §3.1, §3.4).
 
-SyncRunner      single loop; with FakeClock it is deterministic -> scenario tests.
-ThreadedRunner  capture / worker / heartbeat threads + supervisor -> real runs.
+SyncRunner      단일 루프. FakeClock과 함께 쓰면 결과가 결정적이다 -> 시나리오 테스트.
+ThreadedRunner  capture / worker / heartbeat 스레드 + 감독 -> 실제 운용.
 
-Both use process_frame(), so the decision logic is identical; only the way
-frames are scheduled differs.
+둘 다 process_frame()을 쓰므로 판단 로직은 같고, 프레임을 처리하는 방식만 다르다.
 """
 
 import logging
@@ -22,10 +21,10 @@ log = logging.getLogger("psafe.runner")
 
 
 def process_frame(c: Components, pkt: FramePacket) -> tuple[Decision, Detections | None]:
-    """health check -> detector -> FSM for one frame. Shared by all runners.
+    """프레임 1장에 대해 health 검사 -> 검출기 -> FSM. 모든 Runner가 공유한다.
 
-    A detector exception must never crash the loop or leave the last Y
-    standing: it becomes a FAULT decision.
+    검출기 예외가 루프를 죽이거나 마지막 Y를 그대로 남겨 두어서는 안 된다.
+    예외는 FAULT 판단으로 바뀐다.
     """
     fault = c.health.check(pkt)
     try:
@@ -45,7 +44,7 @@ def notify_frame(c: Components, pkt: FramePacket, dets: Detections | None, decis
 
 
 def poll_outputs(c: Components) -> bool:
-    """Main-thread GUI hook. False if any output asked to stop."""
+    """메인 스레드 GUI 훅. 어떤 Output이든 종료를 요청하면 False."""
     keep = True
     for o in c.outputs:
         try:
@@ -56,10 +55,10 @@ def poll_outputs(c: Components) -> bool:
 
 
 def open_all(c: Components, stack: ExitStack) -> float:
-    """Open outputs -> detector -> source (camera LAST, so model loading time
-    doesn't make the first frames stale). Each close is registered as soon as
-    its part is opened; ExitStack closes in reverse order, even on errors.
-    Returns the clock time the source was opened (= scenario t=0)."""
+    """Output -> 검출기 -> Source 순으로 연다 (카메라를 마지막에 열어서 모델
+    로딩 시간 때문에 첫 프레임이 오래된 프레임이 되지 않게 한다). 각 부품은
+    열자마자 close를 등록하며, ExitStack은 오류가 나도 역순으로 닫는다.
+    Source를 연 시각(= 시나리오 t=0)을 반환한다."""
     for o in c.outputs:
         o.open()
         stack.callback(o.close)
@@ -74,16 +73,16 @@ def open_all(c: Components, stack: ExitStack) -> float:
 
 @dataclass
 class RunResult:
-    start: float = 0.0                 # clock time when the source opened
+    start: float = 0.0                 # Source를 연 시각
     decisions: list[Decision] = field(default_factory=list)
-    frames: int = 0                    # frames processed by the model
-    timeouts: int = 0                  # waits that ended without a frame
-    skipped: int = 0                   # frames the source dropped because we were slow
-    dropped: int = 0                   # frames overwritten in the slot before the worker took them
+    frames: int = 0                    # 모델이 처리한 프레임 수
+    timeouts: int = 0                  # 프레임 없이 끝난 대기 횟수
+    skipped: int = 0                   # 처리가 느려서 Source가 건너뛴 프레임 수
+    dropped: int = 0                   # worker가 가져가기 전에 슬롯에서 덮어쓰인 프레임 수
     heartbeats: int = 0
-    stale_heartbeats: int = 0          # heartbeats that had to send N because the decision was too old
+    stale_heartbeats: int = 0          # 판단이 너무 오래되어 N을 보낸 하트비트 수
     infer_ms_total: float = 0.0
-    error: str | None = None           # set if the run stopped because something broke
+    error: str | None = None           # 무언가 고장 나서 실행이 멈췄으면 설정됨
 
     @property
     def avg_infer_ms(self) -> float:
@@ -95,12 +94,11 @@ class RunResult:
 # ---------------------------------------------------------------------------
 
 class SyncRunner:
-    """source.read -> process_frame -> outputs.send, one frame at a time.
+    """source.read -> process_frame -> outputs.send 를 한 프레임씩 수행한다.
 
-    Also reproduces what the threaded worker does when frames stop coming:
-    every `frame timeout` without a frame it calls fsm.on_no_frame(). That is
-    replayed after the fact from timestamps, so outages are visible in the
-    decision log at the right times.
+    프레임이 끊겼을 때 threaded worker가 하는 동작도 재현한다: 프레임 없이
+    `frame timeout`이 지날 때마다 fsm.on_no_frame()을 호출한다. 이는 시각
+    정보로 사후에 재생되므로, 끊김이 판단 로그의 올바른 시점에 나타난다.
     """
 
     def __init__(self, c: Components, max_frames: int | None = None):
@@ -117,7 +115,7 @@ class SyncRunner:
                 pkt = c.source.read()
                 if pkt is None:
                     break
-                # Gap since the last frame/decision -> the worker would have timed out.
+                # 직전 프레임/판단 이후 간격이 크면 -> worker라면 시간 초과가 났을 것.
                 while pkt.timestamp - last_t > self.frame_timeout_s:
                     last_t += self.frame_timeout_s
                     self._emit(c.fsm.on_no_frame(last_t), result)
@@ -154,9 +152,9 @@ class SyncRunner:
 # ---------------------------------------------------------------------------
 
 class DecisionBoard:
-    """Latest decision, written by the worker, read by the heartbeat.
-    (Not a LatestSlot: fault decisions have seq -1, and the heartbeat must
-    re-read the same decision every period.)"""
+    """최신 판단. worker가 쓰고 heartbeat가 읽는다.
+    (LatestSlot이 아닌 이유: FAULT 판단은 seq가 -1이고, heartbeat는 같은
+    판단을 매 주기 다시 읽어야 한다.)"""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -173,16 +171,16 @@ class DecisionBoard:
 
 class ThreadedRunner:
     """
-    T1 capture    source.read() as fast as the camera gives frames -> frame_slot (latest only)
-    T2 worker     frame_slot.get(timeout) -> process_frame -> board   (owns the FSM, no lock needed)
-                  timeout -> fsm.on_no_frame()
-    T3 heartbeat  every heartbeat_ms: board.latest() -> outputs
-                  decision older than max_decision_age_ms -> N  (catches a hung worker)
-    main          supervisor: metrics, thread liveness, Ctrl+C, end of stream
+    T1 capture    카메라가 주는 속도대로 source.read() -> frame_slot (최신 1장만)
+    T2 worker     frame_slot.get(timeout) -> process_frame -> board   (FSM을 단독 소유, 락 불필요)
+                  시간 초과 -> fsm.on_no_frame()
+    T3 heartbeat  heartbeat_ms마다 board.latest() -> outputs
+                  판단이 max_decision_age_ms보다 오래되면 -> N  (멈춘 worker를 잡아냄)
+    main          감독: 지표 기록, 스레드 생존 확인, Ctrl+C, 스트림 종료
 
-    Any thread dying stops the run with result.error set; the last thing sent
-    to outputs is always an N ("shutdown"). In production a process manager
-    (systemd) restarts us, and the ESP32 watchdog covers the gap.
+    어떤 스레드든 죽으면 result.error를 설정하고 실행을 멈춘다. Output에 마지막으로
+    보내는 신호는 항상 N("shutdown")이다. 실제 운용에서는 프로세스 관리자
+    (systemd)가 재시작하고, 그 사이는 ESP32 워치독이 맡는다.
     """
 
     JOIN_TIMEOUT_S = 2.0
@@ -206,7 +204,7 @@ class ThreadedRunner:
         self._source_done = threading.Event()
         self._crashed: dict[str, str] = {}
 
-    # ---- lifecycle ---------------------------------------------------------
+    # ---- 생명주기 ---------------------------------------------------------
 
     def run(self) -> RunResult:
         c, r = self.c, self.result
@@ -242,7 +240,7 @@ class ThreadedRunner:
         return r
 
     def stop(self) -> None:
-        """Ask the run to end (from another thread, e.g. a test or a signal handler)."""
+        """실행 종료를 요청한다 (다른 스레드에서, 예: 테스트나 시그널 핸들러)."""
         self._stop.set()
 
     def _guard(self, name: str, fn: Callable[[], None]) -> Callable[[], None]:
@@ -257,7 +255,7 @@ class ThreadedRunner:
     def _supervise(self, threads: list[threading.Thread]) -> None:
         c, r = self.c, self.result
         next_metrics = c.clock.now() + self.metrics_interval_s
-        last = (0, 0)  # (frames captured, frames processed) at the previous metrics line
+        last = (0, 0)  # 직전 지표 기록 시점의 (캡처한 프레임 수, 처리한 프레임 수)
         while not self._stop.is_set():
             if self._crashed:
                 r.error = "; ".join(f"{k}: {v}" for k, v in self._crashed.items())
@@ -296,7 +294,7 @@ class ThreadedRunner:
         )
         return cap, proc
 
-    # ---- threads -----------------------------------------------------------
+    # ---- 스레드 -----------------------------------------------------------
 
     def _capture_loop(self) -> None:
         while not self._stop.is_set():
@@ -318,7 +316,7 @@ class ThreadedRunner:
                 r.timeouts += 1
             else:
                 decision, dets = process_frame(c, pkt)
-                self.board.publish(decision)        # publish first: drawing must not delay the heartbeat
+                self.board.publish(decision)        # 먼저 게시: 화면 그리기가 하트비트를 늦추면 안 된다
                 r.frames += 1
                 r.infer_ms_total += dets.infer_ms if dets else 0.0
                 notify_frame(c, pkt, dets, decision)
@@ -341,7 +339,7 @@ class ThreadedRunner:
 
             next_t += self.period_s
             delay = next_t - c.clock.now()
-            if delay < 0:          # fell behind (e.g. slow output): don't burst to catch up
+            if delay < 0:          # 밀렸으면 (예: 느린 Output) 따라잡으려고 몰아서 보내지 않는다
                 next_t, delay = c.clock.now(), 0.0
             self._stop.wait(delay)
 
@@ -350,6 +348,6 @@ class ThreadedRunner:
             try:
                 o.send(d)
             except Exception:
-                # One broken output must not silence the others. If the serial
-                # link is the broken one, the ESP32 watchdog turns it into N.
+                # 고장 난 Output 하나 때문에 나머지가 멈추면 안 된다. 고장 난 것이
+                # 시리얼 링크라면 ESP32 워치독이 N으로 처리한다.
                 log.exception("output %s failed", type(o).__name__)

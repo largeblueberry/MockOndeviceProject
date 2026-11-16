@@ -1,9 +1,9 @@
-"""Run a scenario file and check its `expect` list (DESIGN.md §6.2).
+"""시나리오 파일을 실행하고 `expect` 목록을 검증한다 (DESIGN.md §6.2).
 
     python -m psafe --scenario scenarios/flicker.yaml --check
 
-The scenario's `config:` block is merged over the base config, so a scenario
-can carry its own model noise / thresholds (e.g. flicker.yaml sets miss_rate).
+시나리오의 `config:` 블록은 기본 설정 위에 병합되므로, 시나리오마다 모델
+노이즈나 임계값을 따로 가질 수 있다 (예: flicker.yaml은 miss_rate를 설정).
 """
 
 import copy
@@ -23,7 +23,7 @@ from psafe.sources.scenario import Scenario, load_scenario
 
 
 def deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
-    """Recursive dict merge. Lists and scalars in `over` replace those in `base`."""
+    """dict 재귀 병합. `over`의 리스트와 단일 값은 `base`의 값을 대체한다."""
     out = copy.deepcopy(base)
     for k, v in over.items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -33,7 +33,7 @@ def deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-# Small frames keep scenario runs fast; health checks don't depend on resolution.
+# 작은 프레임을 써서 시나리오 실행을 빠르게 한다. health 검사는 해상도와 무관하다.
 SCENARIO_DEFAULTS = {"source": {"options": {"width": 160, "height": 120}}}
 
 
@@ -49,17 +49,17 @@ def config_for_scenario(base_raw: dict[str, Any], scenario_path: str | Path, sc:
 
 
 def decision_at(decisions: list[Decision], t: float) -> Decision | None:
-    """The decision in force at clock time t: the last one made at or before t."""
+    """시각 t에 유효한 판단: t 이전(포함)에 내려진 마지막 판단."""
     times = [d.decided_at for d in decisions]
     i = bisect_right(times, t + 1e-9)
     return decisions[i - 1] if i else None
 
 
 def unsafe_yes(sc: Scenario, result: RunResult, roi: Roi) -> list[str]:
-    """Safety invariant over EVERY decision, not just the sampled `expect` points:
-    a Y must never be based on a frame where a person was really in the ROI.
-    Uses the scenario world (truth), not what the camera/model saw, so it also
-    catches blackout/freeze cases the model was blind to."""
+    """샘플링한 `expect` 시점만이 아니라 모든 판단에 대한 안전 불변식:
+    실제로 ROI 안에 사람이 있던 프레임을 근거로 Y가 나와서는 안 된다.
+    카메라/모델이 본 것이 아니라 시나리오의 world(정답)를 쓰므로, 모델이 보지
+    못한 blackout/freeze 경우도 잡아낸다."""
     bad = []
     for d in result.decisions:
         if not d.safe or d.seq < 0:
@@ -108,9 +108,9 @@ class ScenarioReport:
 
 def run_scenario(scenario_path: str | Path, base_config: str | Path = "config/default.yaml",
                  extra_outputs: list | None = None, mode: str = "sync") -> ScenarioReport:
-    """mode="sync": FakeClock, instant, deterministic.
-    mode="threaded": real clock and real threads -> takes the scenario's real
-    duration, timing jitter included. Same expectations must still hold."""
+    """mode="sync": FakeClock, 즉시 실행, 결정적.
+    mode="threaded": 실제 시계와 실제 스레드 -> 시나리오의 실제 길이만큼 걸리며
+    타이밍 흔들림도 포함된다. 그래도 같은 expect가 성립해야 한다."""
     sc = load_scenario(scenario_path)
     with open(base_config, encoding="utf-8") as f:
         base_raw = yaml.safe_load(f) or {}

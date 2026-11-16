@@ -1,3 +1,3 @@
-"""Parking tower safety detection pipeline."""
+"""주차 타워 안전 감지 파이프라인."""
 
 __version__ = "0.1.0"

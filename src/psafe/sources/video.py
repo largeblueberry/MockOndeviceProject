@@ -1,11 +1,11 @@
-"""VideoFileSource: plays a recorded clip as if it were a live camera.
+"""VideoFileSource: 녹화된 영상을 실시간 카메라처럼 재생한다.
 
-Same timing rules as DummySource:
-  * paced to the file's fps against the injected clock,
-  * read() returns the LATEST due frame (frames in between are grabbed and
-    discarded, counted in `skipped`),
-  * timestamp = when the frame was "captured" (start + idx / fps).
-With FakeClock this makes a clip run instantly and deterministically.
+DummySource와 같은 시간 규칙을 따른다:
+  * 주입된 시계 기준으로 파일의 fps에 맞춰 속도를 조절한다,
+  * read()는 시각이 된 프레임 중 최신 것을 반환한다 (그 사이 프레임은 가져와서
+    버리고 `skipped`에 집계),
+  * timestamp = 프레임이 "촬영된" 시각 (start + idx / fps).
+FakeClock과 함께 쓰면 영상이 즉시, 결정적으로 재생된다.
 """
 
 from pathlib import Path
@@ -26,7 +26,7 @@ class VideoFileSource(Source):
         clock: Clock,
         path: str,
         loop: bool = False,
-        fps: float | None = None,              # override the file's fps
+        fps: float | None = None,              # 파일의 fps 대신 사용
         resize: list[int] | None = None,       # [width, height]
         source_id: str = "video",
     ):
@@ -47,9 +47,9 @@ class VideoFileSource(Source):
             raise RuntimeError(f"cannot open video: {self.path}")
         self.fps = float(self.fps_override or self._cap.get(cv2.CAP_PROP_FPS) or 30.0)
         self._start = self.clock.now()
-        self._next_idx = 0      # global frame index (keeps growing across loops)
-        self._offset = 0        # global index of file frame 0 in the current loop
-        self._file_pos = 0      # next frame the decoder will return
+        self._next_idx = 0      # 전체 프레임 번호 (반복 재생해도 계속 증가)
+        self._offset = 0        # 현재 반복에서 파일 0번 프레임의 전체 번호
+        self._file_pos = 0      # 디코더가 다음에 반환할 프레임
         self.skipped = 0
 
     def read(self) -> FramePacket | None:
@@ -62,7 +62,7 @@ class VideoFileSource(Source):
         idx = max(self._next_idx, due)
         self.skipped += idx - self._next_idx
 
-        # Throw away frames we are too late for (grab = decode-light skip).
+        # 이미 늦은 프레임은 버린다 (grab = 디코딩을 최소화한 건너뛰기).
         while self._file_pos < idx - self._offset:
             if cap.grab():
                 self._file_pos += 1
@@ -90,7 +90,7 @@ class VideoFileSource(Source):
         )
 
     def _rewind(self, idx: int) -> bool:
-        """End of file. With loop, map global frame `idx` to file frame 0."""
+        """파일 끝. loop이면 전체 프레임 번호 `idx`를 파일 0번 프레임에 대응시킨다."""
         if not self.loop or self._file_pos == 0:
             return False
         assert self._cap is not None

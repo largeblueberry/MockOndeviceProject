@@ -5,8 +5,8 @@ timeline:
   - { from: 5.0, to: 7.0,  objects: [], camera: outage }
   - { from: 7.0, to: 13.0, objects: [] }
 expect:
-  - { at: 4.0,  safe: true }    # empty bay, clear after 3 s
-  - { at: 5.8,  safe: false }   # no frame for > max_frame_age_ms -> FAULT
+  - { at: 4.0,  safe: true }    # 빈 구역, 3초 후 CLEAR
+  - { at: 5.8,  safe: false }   # max_frame_age_ms 넘게 프레임 없음 -> FAULT
   - { at: 6.9,  safe: false }
-  - { at: 9.0,  safe: false }   # frames are back, but must re-verify from scratch
-  - { at: 11.5, safe: true }    # 7.0 + recover frames + 3 s
+  - { at: 9.0,  safe: false }   # 프레임은 돌아왔지만 처음부터 다시 검증해야 함
+  - { at: 11.5, safe: true }    # 7.0 + 복구 프레임 + 3초

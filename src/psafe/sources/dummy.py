@@ -1,16 +1,16 @@
-"""DummySource: renders synthetic frames from a scenario and attaches ground truth.
+"""DummySource: 시나리오로부터 가상 프레임을 그리고 정답(ground truth)을 붙인다.
 
-Lets the whole pipeline (FSM, slots, outputs) run without a camera or model.
+카메라나 모델 없이 파이프라인 전체(FSM, 슬롯, Output)를 돌릴 수 있게 한다.
 
-Behaves like a real camera in the ways that matter for safety:
-  * read() returns the LATEST frame. If the consumer was slow, frames in
-    between are skipped (counted in `skipped`), like LatestSlot would do.
-  * Images carry sensor noise, so two frames of an empty scene still differ.
-    Without it, freeze detection could not tell "static scene" from "stuck camera".
-  * camera faults (outage / blackout / freeze) from the scenario.
+안전에 중요한 점에서는 실제 카메라처럼 동작한다:
+  * read()는 최신 프레임을 반환한다. 소비자가 느렸다면 그 사이 프레임은
+    건너뛴다 (`skipped`에 집계). LatestSlot과 같은 동작이다.
+  * 이미지에 센서 노이즈가 있어서 빈 장면의 두 프레임도 서로 다르다.
+    노이즈가 없으면 화면 정지 감지가 "정적인 장면"과 "멈춘 카메라"를 구분할 수 없다.
+  * 시나리오에 정의된 카메라 이상 (outage / blackout / freeze).
 
-meta["gt"]    = what the camera can see -> DummyDetector reports this
-meta["world"] = what is really in the bay -> for checking / debugging
+meta["gt"]    = 카메라가 볼 수 있는 것 -> DummyDetector가 이것을 보고한다
+meta["world"] = 구역에 실제로 있는 것 -> 검증 / 디버깅용
 """
 
 import cv2
@@ -22,7 +22,7 @@ from psafe.sources.base import SOURCES, Source
 from psafe.sources.scenario import Scenario, load_scenario
 
 COLORS = {"car": (200, 120, 40), "person": (60, 200, 60)}  # BGR
-DRAW_ORDER = {"car": 0}  # cars behind, everything else on top
+DRAW_ORDER = {"car": 0}  # 차는 뒤에, 나머지는 위에 그린다
 EPS = 1e-9
 
 
@@ -46,8 +46,8 @@ class DummySource(Source):
         self.loop, self.render = loop, render
         self.noise_sigma = noise_sigma
         self.seed = seed
-        self.skipped = 0       # frames dropped because the consumer was slow
-        self.outage_frames = 0  # frames the camera never produced
+        self.skipped = 0       # 소비자가 느려서 버린 프레임 수
+        self.outage_frames = 0  # 카메라가 만들지 않은 프레임 수
         self._next_idx = 0
         self._start: float | None = None
         self._last: tuple[np.ndarray, tuple[Detection, ...]] | None = None
@@ -66,13 +66,13 @@ class DummySource(Source):
         assert self._start is not None
         sc = self.scenario
 
-        # Latest frame the camera has produced by now (never go backwards).
+        # 지금까지 카메라가 만든 최신 프레임 (뒤로 가지 않는다).
         due_idx = int((self.clock.now() - self._start) * sc.fps + EPS)
         idx = max(self._next_idx, due_idx)
         self.skipped += idx - self._next_idx
 
-        # Skip over outage: the camera produces nothing, time just passes.
-        max_skip = int(sc.duration * sc.fps) + 1  # guard: looping scenario that is all outage
+        # 끊김 구간 건너뛰기: 카메라는 아무것도 만들지 않고 시간만 흐른다.
+        max_skip = int(sc.duration * sc.fps) + 1  # 방어: 전 구간이 끊김인 반복 시나리오
         for _ in range(max_skip + 1):
             t_rel = self._scenario_time(idx)
             if t_rel is None:
@@ -84,7 +84,7 @@ class DummySource(Source):
         else:
             return None
 
-        # Pace like a real camera: wait until this frame is due.
+        # 실제 카메라처럼 속도 조절: 이 프레임의 시각이 될 때까지 기다린다.
         self.clock.sleep(self._start + idx / sc.fps - self.clock.now())
 
         world = sc.objects_at(t_rel)
@@ -92,8 +92,8 @@ class DummySource(Source):
         self._next_idx = idx + 1
         return FramePacket(
             seq=idx,
-            # Capture time, not read time: a frame grabbed late is still as old as
-            # when it was taken. Using now() here would hide staleness from the FSM.
+            # 읽은 시각이 아니라 촬영 시각을 쓴다: 늦게 가져온 프레임도 찍힌 시점만큼
+            # 오래된 것이다. 여기서 now()를 쓰면 FSM이 오래된 프레임을 알아채지 못한다.
             timestamp=self._start + idx / sc.fps,
             source_id=self.source_id,
             image=image,
@@ -108,10 +108,10 @@ class DummySource(Source):
 
     def _capture(self, camera: str, world: tuple[Detection, ...]) -> tuple[np.ndarray, tuple[Detection, ...]]:
         if camera == "freeze" and self._last is not None:
-            return self._last  # exact same pixels and same visible objects
+            return self._last  # 픽셀도, 보이는 객체도 완전히 같음
         if camera == "blackout":
             img = self._noisy(np.zeros((self.height, self.width, 3), np.uint8))
-            return img, ()  # lens covered: a person may be there, but nothing is visible
+            return img, ()  # 렌즈 가림: 사람이 있을 수 있지만 아무것도 보이지 않는다
         img = self._noisy(self._draw(world))
         self._last = (img, world)
         return img, world

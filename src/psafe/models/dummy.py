@@ -1,11 +1,11 @@
-"""DummyDetector: reports the ground truth DummySource attached, plus noise
-that mimics a real model on a Raspberry Pi.
+"""DummyDetector: DummySource가 붙여 준 정답을 보고하되, 라즈베리파이에서 도는
+실제 모델을 흉내 내는 노이즈를 섞는다.
 
-    miss_rate   probability that each true object is dropped in a frame (flicker)
-    false_rate  probability per frame of a phantom person
-    latency_ms  inference time; advances the injected clock, so with FakeClock
-                it costs no real time but frames still go stale / get skipped
-    seed        noise is reproducible: same seed -> same run
+    miss_rate   프레임마다 실제 객체 하나하나를 놓칠 확률 (깜빡임)
+    false_rate  프레임마다 없는 사람을 검출할 확률
+    latency_ms  추론 시간. 주입된 시계를 진행시키므로 FakeClock에서는 실제
+                시간이 들지 않지만, 프레임이 오래되거나 건너뛰어지는 효과는 같다
+    seed        노이즈 재현용: 같은 seed -> 같은 실행 결과
 """
 
 import random

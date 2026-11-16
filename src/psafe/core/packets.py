@@ -1,7 +1,7 @@
-"""Data contracts passed between pipeline stages (DESIGN.md §4).
+"""파이프라인 단계 사이에 주고받는 데이터 계약 (DESIGN.md §4).
 
-These types are the agreement between modules. Changing a field here means
-every stage must be checked, so keep them small and stable.
+이 타입들은 모듈 간의 약속이다. 필드를 바꾸면 모든 단계를 다시 확인해야
+하므로, 작고 안정적으로 유지한다.
 """
 
 from dataclasses import dataclass, field
@@ -10,23 +10,23 @@ from typing import Any
 
 import numpy as np
 
-BBox = tuple[float, float, float, float]  # (x1, y1, x2, y2), normalized to 0..1
+BBox = tuple[float, float, float, float]  # (x1, y1, x2, y2), 0..1로 정규화
 
 
 @dataclass(frozen=True, slots=True)
 class Detection:
-    cls: str      # internal standard class name: "person", "car", ...
-    conf: float   # 0..1
-    bbox: BBox    # normalized coordinates
+    cls: str      # 내부 표준 클래스 이름: "person", "car", ...
+    conf: float   # 신뢰도 0..1
+    bbox: BBox    # 정규화 좌표
 
 
 @dataclass(frozen=True, slots=True)
 class FramePacket:
-    seq: int                 # monotonically increasing frame number
-    timestamp: float         # capture time from the injected Clock (seconds)
+    seq: int                 # 단조 증가하는 프레임 번호
+    timestamp: float         # 주입된 Clock 기준 촬영 시각 (초)
     source_id: str
     image: np.ndarray        # H x W x 3, BGR, uint8
-    meta: dict[str, Any] = field(default_factory=dict)  # dummy source puts ground truth here
+    meta: dict[str, Any] = field(default_factory=dict)  # dummy 소스는 여기에 정답(ground truth)을 넣는다
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,12 +48,12 @@ class State(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class Decision:
-    safe: bool          # final output: True = Y, False = N
+    safe: bool          # 최종 출력: True = Y, False = N
     state: State
-    reason: str         # e.g. "person_in_roi", "clear_3.0s", "stale_frame"
-    seq: int            # frame that produced this decision (-1 if none)
-    timestamp: float    # capture time of that frame
-    decided_at: float   # clock time when the decision was made
+    reason: str         # 예: "person_in_roi", "clear", "stale_frame"
+    seq: int            # 이 판단을 만든 프레임 번호 (없으면 -1)
+    timestamp: float    # 그 프레임의 촬영 시각
+    decided_at: float   # 판단을 내린 시각 (Clock 기준)
 
     @property
     def yn(self) -> str:
@@ -61,5 +61,5 @@ class Decision:
 
 
 def unsafe(state: State, reason: str, now: float, seq: int = -1, timestamp: float = -1.0) -> Decision:
-    """Shorthand for an N decision. Used everywhere we fail safe."""
+    """N 판단을 만드는 단축 함수. 안전 쪽으로 실패해야 하는 모든 곳에서 쓴다."""
     return Decision(False, state, reason, seq, timestamp, now)

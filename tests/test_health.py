@@ -36,19 +36,19 @@ def test_frozen_frame():
     h = HealthMonitor(HealthConfig(freeze_frames=2))
     img = noisy(90)
     assert h.check(pkt(0, img)) is None
-    assert h.check(pkt(1, img)) is None          # 1 identical frame: not yet
+    assert h.check(pkt(1, img)) is None          # 같은 프레임 1장: 아직 아님
     assert h.check(pkt(2, img)) == "frozen_frame"
-    assert h.check(pkt(3, noisy(90))) is None    # camera moving again
+    assert h.check(pkt(3, noisy(90))) is None    # 카메라가 다시 움직임
 
 
 def test_without_health_checks_blackout_is_unsafe():
-    """Why health checks exist: disable them and the lens-covered scenario
-    produces Y while a person is standing in the bay."""
+    """health 검사가 필요한 이유: 검사를 끄면 렌즈를 가린 시나리오에서
+    사람이 구역 안에 서 있는데도 Y가 나온다."""
     path = "scenarios/camera_blackout.yaml"
     sc = load_scenario(path)
     with open("config/default.yaml", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
-    raw["health"].update(min_brightness=-1, freeze_diff_threshold=-1)  # checks off
+    raw["health"].update(min_brightness=-1, freeze_diff_threshold=-1)  # 검사 끔
     c = build(config_for_scenario(raw, path, sc), clock=FakeClock())
     failures = check(sc, SyncRunner(c).run(), c.fsm.roi)
     assert any(f.startswith("UNSAFE") for f in failures)

@@ -1,4 +1,4 @@
-"""Name -> class lookup so config.yaml can pick implementations (DESIGN.md §5.3)."""
+"""이름 -> 클래스 조회표. config.yaml에서 구현체를 고를 수 있게 한다 (DESIGN.md §5.3)."""
 
 import inspect
 from typing import Any, Callable, Generic, TypeVar
@@ -20,11 +20,11 @@ class Registry(Generic[T]):
         return deco
 
     def create(self, name: str, inject: dict[str, Any] | None = None, **options: Any) -> T:
-        """Instantiate `name` with config `options`.
+        """`name`에 해당하는 클래스를 설정의 `options`로 생성한다.
 
-        `inject` holds runtime dependencies (e.g. clock). Each one is passed
-        only if the class's constructor declares a parameter with that name,
-        so implementations ask for what they need and nothing more.
+        `inject`에는 실행 중 의존성(예: clock)이 들어 있다. 각 값은 클래스
+        생성자에 같은 이름의 매개변수가 있을 때만 전달되므로, 구현체는
+        필요한 것만 요청할 수 있다.
         """
         if name not in self._items:
             raise KeyError(f"unknown {self.kind} '{name}'. available: {sorted(self._items)}")

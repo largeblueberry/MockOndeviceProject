@@ -1,8 +1,8 @@
-"""Every scenarios/*.yaml must meet its `expect` list.
+"""모든 scenarios/*.yaml은 자신의 `expect` 목록을 만족해야 한다.
 
-Until the real FSM lands (M3) the placeholder always says N, so scenarios
-expecting a Y are marked xfail(strict): once M3 makes them pass, the strict
-marker turns them red as a reminder to delete NEEDS_FSM.
+실제 FSM이 들어오기 전(M3 이전)에는 임시 구현이 항상 N을 내므로, Y를 기대하는
+시나리오는 xfail(strict)로 표시했다. M3에서 통과하게 되면 strict 표시 때문에
+실패로 바뀌어 NEEDS_FSM을 지우라는 알림 역할을 한다.
 """
 
 from pathlib import Path
@@ -15,7 +15,7 @@ from psafe.scenario_check import check, decision_at, run_scenario
 from psafe.sources.scenario import load_scenario, parse_scenario
 
 SCENARIOS = sorted(Path("scenarios").glob("*.yaml"))
-NEEDS_FSM = False  # M3: real FSM in place.
+NEEDS_FSM = False  # M3: 실제 FSM 적용 완료.
 
 
 def _param(p: Path):
@@ -34,7 +34,7 @@ def test_scenarios_exist():
     assert len(SCENARIOS) >= 6
 
 
-# ---- the checker itself ------------------------------------------------------
+# ---- 검증기 자체 ------------------------------------------------------
 
 def _d(t, safe):
     return Decision(safe, State.CLEAR if safe else State.OCCUPIED, "x", 0, t, t)
@@ -57,6 +57,6 @@ def test_check_reports_mismatch():
 
 def test_outage_produces_timeout_decisions():
     report = run_scenario("scenarios/camera_outage.yaml")
-    assert report.result.timeouts >= 3                      # 2 s gap / 0.5 s timeout
+    assert report.result.timeouts >= 3                      # 2초 공백 / 0.5초 시간 초과
     d = decision_at(report.result.decisions, report.result.start + 6.0)
     assert d.state == State.FAULT and d.reason == "no_frame"

@@ -1,7 +1,7 @@
-"""Injectable clocks (DESIGN.md §3.4).
+"""주입 가능한 시계 (DESIGN.md §3.4).
 
-No component calls time.time() directly. Real runs use RealClock; scenario
-tests use FakeClock, so a 15 s scenario finishes instantly and identically.
+어떤 부품도 time.time()을 직접 호출하지 않는다. 실제 실행은 RealClock,
+시나리오 테스트는 FakeClock을 쓰므로 15초 시나리오가 즉시, 매번 똑같이 끝난다.
 """
 
 import threading
@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 class Clock(ABC):
     @abstractmethod
     def now(self) -> float:
-        """Monotonic time in seconds."""
+        """단조 증가 시각 (초)."""
 
     @abstractmethod
     def sleep(self, seconds: float) -> None: ...
@@ -28,7 +28,7 @@ class RealClock(Clock):
 
 
 class FakeClock(Clock):
-    """Time only moves when someone sleeps or calls advance()."""
+    """누군가 sleep()이나 advance()를 호출할 때만 시간이 흐른다."""
 
     def __init__(self, start: float = 0.0):
         self._t = start

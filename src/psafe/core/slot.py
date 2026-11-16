@@ -1,8 +1,8 @@
-"""LatestSlot: a size-1 channel that always holds the newest item (DESIGN.md §3.2).
+"""LatestSlot: 항상 최신 항목 1개만 담는 크기 1 채널 (DESIGN.md §3.2).
 
-put() overwrites; get() waits for an item newer than the last one read.
-Equivalent to a maxsize=1 queue with drop-oldest, but without the
-race between "full -> get_nowait -> put" that a plain queue.Queue has.
+put()은 덮어쓰고, get()은 마지막으로 읽은 것보다 새로운 항목을 기다린다.
+"오래된 것 버리기"를 하는 maxsize=1 큐와 같지만, 일반 queue.Queue에서 생기는
+"가득 참 -> get_nowait -> put" 사이의 경쟁 상태가 없다.
 """
 
 import threading
@@ -22,7 +22,7 @@ class LatestSlot(Generic[T]):
         self._item: T | None = None
         self._last_read_seq = -1
         self._closed = False
-        self.dropped = 0   # items overwritten before anyone read them
+        self.dropped = 0   # 아무도 읽기 전에 덮어쓰인 항목 수
         self.put_count = 0
 
     def put(self, item: T) -> None:
@@ -36,7 +36,7 @@ class LatestSlot(Generic[T]):
             self._cond.notify_all()
 
     def get(self, timeout: float | None = None) -> T | None:
-        """Block until a new item arrives. Returns None on timeout or close."""
+        """새 항목이 올 때까지 대기한다. 시간 초과나 close 시 None을 반환한다."""
         with self._cond:
             ok = self._cond.wait_for(lambda: self._closed or self._has_new(), timeout)
             if not ok or not self._has_new():
@@ -46,12 +46,12 @@ class LatestSlot(Generic[T]):
             return self._item
 
     def peek(self) -> T | None:
-        """Latest item without waiting or marking it read (used by the heartbeat)."""
+        """대기하지 않고, 읽음 표시도 하지 않고 최신 항목을 본다 (하트비트용)."""
         with self._cond:
             return self._item
 
     def close(self) -> None:
-        """Wake up all waiters so threads can exit."""
+        """대기 중인 스레드를 모두 깨워 종료할 수 있게 한다."""
         with self._cond:
             self._closed = True
             self._cond.notify_all()

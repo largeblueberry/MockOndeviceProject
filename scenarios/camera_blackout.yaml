@@ -6,7 +6,7 @@ timeline:
   - { from: 7.0, to: 12.0, objects: [] }
 expect:
   - { at: 3.5,  safe: true }
-  - { at: 4.5,  safe: false }   # dark frame -> FAULT
+  - { at: 4.5,  safe: false }   # 어두운 프레임 -> FAULT
   - { at: 6.5,  safe: false }
-  - { at: 9.0,  safe: false }   # recovering
+  - { at: 9.0,  safe: false }   # 복구 중
   - { at: 11.5, safe: true }

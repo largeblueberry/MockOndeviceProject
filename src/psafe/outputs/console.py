@@ -8,8 +8,8 @@ log = logging.getLogger("psafe.output.console")
 
 @OUTPUTS.register("console")
 class ConsoleOutput(Output):
-    """Logs Y/N. By default only when (safe, state, reason) changes, since
-    send() is called on every heartbeat."""
+    """Y/N을 로그로 남긴다. send()는 하트비트마다 호출되므로, 기본값은
+    (safe, state, reason)이 바뀔 때만 기록한다."""
 
     def __init__(self, every: bool = False):
         self.every = every

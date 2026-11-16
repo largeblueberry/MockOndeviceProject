@@ -1,5 +1,5 @@
-# Pipeline configuration (DESIGN.md §9)
-# Pluggable parts: `name` picks the implementation, `options` go to its constructor.
+# 파이프라인 설정 (DESIGN.md §9)
+# 교체 가능한 부품: `name`으로 구현체를 고르고, `options`는 그 생성자로 전달된다.
 
 source:
   name: dummy               # dummy | video | webcam | picamera

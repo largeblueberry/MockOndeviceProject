@@ -1,5 +1,5 @@
-"""Builds pipeline components from an AppConfig. The only place that maps
-config names to classes, so runners stay independent of implementations."""
+"""AppConfig로부터 파이프라인 부품을 생성한다. 설정의 이름을 클래스로 바꾸는
+유일한 곳이므로, Runner는 구현체에 의존하지 않는다."""
 
 from dataclasses import dataclass
 
@@ -31,7 +31,7 @@ def make_clock(cfg: AppConfig) -> Clock:
 
 def build(cfg: AppConfig, clock: Clock | None = None) -> Components:
     clock = clock or make_clock(cfg)
-    # Runtime values a component may ask for by naming a constructor parameter.
+    # 실행 중에 정해지는 값. 부품은 생성자에 같은 이름의 매개변수를 선언하면 받는다.
     inject = {"clock": clock, "roi": cfg.fsm.roi, "person_conf_low": cfg.fsm.person_conf_low}
     return Components(
         cfg=cfg,

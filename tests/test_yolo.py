@@ -1,5 +1,5 @@
-"""YOLO pre/post-processing without a model; real-model test runs only if
-models/yolo11n_320.onnx exists."""
+"""모델 없이 YOLO 전처리/후처리를 검사한다. 실제 모델 테스트는
+models/yolo11n_320.onnx가 있을 때만 실행된다."""
 
 from pathlib import Path
 
@@ -21,20 +21,20 @@ def test_letterbox_landscape():
     img = np.zeros((480, 640, 3), np.uint8)
     out, scale, px, py = letterbox(img, 320)
     assert out.shape == (320, 320, 3)
-    assert scale == 0.5 and px == 0 and py == 40      # 640x480 -> 320x240, padded top/bottom
+    assert scale == 0.5 and px == 0 and py == 40      # 640x480 -> 320x240, 위아래 여백
 
 
 def test_to_blob_layout():
     img = np.zeros((4, 4, 3), np.uint8)
-    img[..., 2] = 255                                  # red in BGR
+    img[..., 2] = 255                                  # BGR 기준 빨강
     b = to_blob(img)
     assert b.shape == (1, 3, 4, 4) and b.dtype == np.float32
-    assert b[0, 0].max() == 1.0 and b[0, 2].max() == 0.0   # channel 0 is R after BGR->RGB
+    assert b[0, 0].max() == 1.0 and b[0, 2].max() == 0.0   # BGR->RGB 후 0번 채널은 R
 
 
 def test_decode_undoes_letterbox_and_normalizes():
-    # 640x480 image -> scale 0.5, pad_y 40. Person at original (100..300, 100..400)
-    # -> model space x 50..150, y 90..240 -> cx 100, cy 165, w 100, h 150
+    # 640x480 이미지 -> 배율 0.5, pad_y 40. 원본 기준 사람 위치 (100..300, 100..400)
+    # -> 모델 좌표 x 50..150, y 90..240 -> cx 100, cy 165, w 100, h 150
     out = raw((100, 165, 100, 150, 0.9, 0.05))
     (d,) = decode(out, NAMES, 0.25, 0.45, 0.5, 0, 40, 640, 480)
     assert d.cls == "person" and d.conf == pytest.approx(0.9)
@@ -47,10 +47,10 @@ def test_decode_filters_low_conf():
 
 def test_nms_merges_overlaps_per_class_only():
     out = raw(
-        (50, 50, 20, 20, 0.9, 0.0),    # person
-        (51, 51, 20, 20, 0.8, 0.0),    # same person, lower score -> suppressed
-        (50, 50, 20, 20, 0.0, 0.7),    # car at the same place -> kept (other class)
-        (10, 10, 5, 5, 0.6, 0.0),      # another person far away -> kept
+        (50, 50, 20, 20, 0.9, 0.0),    # 사람
+        (51, 51, 20, 20, 0.8, 0.0),    # 같은 사람, 더 낮은 점수 -> 제거됨
+        (50, 50, 20, 20, 0.0, 0.7),    # 같은 위치의 차 -> 유지 (다른 클래스)
+        (10, 10, 5, 5, 0.6, 0.0),      # 멀리 있는 다른 사람 -> 유지
     )
     dets = decode(out, NAMES, 0.25, 0.45, 1, 0, 0, 100, 100)
     assert sorted((d.cls, round(d.conf, 1)) for d in dets) == [("car", 0.7), ("person", 0.6), ("person", 0.9)]
