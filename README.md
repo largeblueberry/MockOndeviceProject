@@ -15,6 +15,7 @@
 | [`docs/DESIGN.md`](docs/DESIGN.md) | 설계 원칙, 아키텍처, 데이터 계약, FSM, HW 구성, 통신 프로토콜, 기술 스택 | 설계 의도를 확인할 때 |
 | [`docs/CODE_GUIDE.md`](docs/CODE_GUIDE.md) | 파일 간 연결 관계, 실행 흐름, 주요 설계 패턴, 권장 읽기 순서 | 코드 구조를 처음 볼 때 |
 | [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) | 엣지 케이스 목록(미해결·해결), 실험 기록과 예정 실험 | 알려진 한계와 실측 결과를 확인할 때 |
+| [`docs/STRATEGY.md`](docs/STRATEGY.md) | 차별화 전략, 고장 시연 목록, 예상 질문과 답변 근거, 팀 논의 안건 | 발표·시연 방향을 정할 때 |
 | [`docs/PROGRESS.md`](docs/PROGRESS.md) | 구현 현황, 다음 작업 | 현재 진행 상황을 확인할 때 |
 
 처음 보는 경우 **RESEARCH → DESIGN → CODE_GUIDE** 순서로 읽는다.
