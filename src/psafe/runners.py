@@ -14,13 +14,13 @@ from typing import Callable
 
 from psafe.app import Components
 from psafe.core.clock import FakeClock
-from psafe.core.packets import Decision, Detections, FramePacket, State, unsafe
+from psafe.core.packets import Decision, FrameDetections, FramePacket, State, unsafe
 from psafe.core.slot import LatestSlot
 
 log = logging.getLogger("psafe.runner")
 
 
-def process_frame(c: Components, pkt: FramePacket) -> tuple[Decision, Detections | None]:
+def process_frame(c: Components, pkt: FramePacket) -> tuple[Decision, FrameDetections | None]:
     """프레임 1장에 대해 health 검사 -> 검출기 -> FSM. 모든 Runner가 공유한다.
 
     검출기 예외가 루프를 죽이거나 마지막 Y를 그대로 남겨 두어서는 안 된다.
@@ -35,7 +35,7 @@ def process_frame(c: Components, pkt: FramePacket) -> tuple[Decision, Detections
     return c.fsm.step(dets, c.clock.now(), fault), dets
 
 
-def notify_frame(c: Components, pkt: FramePacket, dets: Detections | None, decision: Decision) -> None:
+def notify_frame(c: Components, pkt: FramePacket, dets: FrameDetections | None, decision: Decision) -> None:
     for o in c.outputs:
         try:
             o.on_frame(pkt, dets, decision)
@@ -104,6 +104,7 @@ class SyncRunner:
     def __init__(self, c: Components, max_frames: int | None = None):
         self.c = c
         self.max_frames = max_frames
+        # 프레임 대기 한도 = 프레임 유효 기간 (core/config.py FsmConfig.max_frame_age_ms 참고)
         self.frame_timeout_s = c.cfg.fsm.max_frame_age_ms / 1000.0
 
     def run(self) -> RunResult:
@@ -194,7 +195,8 @@ class ThreadedRunner:
         rc = c.cfg.runner
         self.period_s = rc.heartbeat_ms / 1000.0
         self.metrics_interval_s = rc.metrics_interval_s
-        self.max_decision_age_s = c.cfg.health.max_decision_age_ms / 1000.0
+        self.max_decision_age_s = rc.max_decision_age_ms / 1000.0
+        # 프레임 대기 한도 = 프레임 유효 기간 (core/config.py FsmConfig.max_frame_age_ms 참고)
         self.frame_timeout_s = c.cfg.fsm.max_frame_age_ms / 1000.0
 
         self.frame_slot: LatestSlot[FramePacket] = LatestSlot()

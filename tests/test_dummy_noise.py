@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from psafe.core.clock import FakeClock
-from psafe.models.dummy import DummyDetector
+from psafe.detectors.dummy import DummyDetector
 from psafe.sources.dummy import DummySource
 from psafe.sources.scenario import parse_scenario
 
@@ -95,7 +95,7 @@ def test_outage_skips_time():
 def test_blackout_hides_person_from_model():
     sc = parse_scenario({"fps": 10, "timeline": [{"from": 0, "to": 1, "objects": ["person"], "camera": "blackout"}]})
     f = DummySource(FakeClock(), sc, 32, 24).read()
-    assert f.meta["gt"] == () and len(f.meta["world"]) == 1
+    assert f.meta["visible"] == () and len(f.meta["world"]) == 1
     assert f.image.mean() < 5
 
 
@@ -106,4 +106,4 @@ def test_freeze_repeats_last_frame():
     ]})
     fs = frames(DummySource(FakeClock(), sc, 32, 24), 15)
     assert np.array_equal(fs[9].image, fs[14].image)
-    assert fs[14].meta["gt"] == () and len(fs[14].meta["world"]) == 1
+    assert fs[14].meta["visible"] == () and len(fs[14].meta["world"]) == 1

@@ -14,7 +14,7 @@ import cv2
 
 from psafe.core.clock import Clock
 from psafe.core.packets import FramePacket
-from psafe.sources.base import SOURCES, Source
+from psafe.sources.source_api import SOURCES, Source
 
 EPS = 1e-9
 

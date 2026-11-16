@@ -9,8 +9,8 @@
     노이즈가 없으면 화면 정지 감지가 "정적인 장면"과 "멈춘 카메라"를 구분할 수 없다.
   * 시나리오에 정의된 카메라 이상 (outage / blackout / freeze).
 
-meta["gt"]    = 카메라가 볼 수 있는 것 -> DummyDetector가 이것을 보고한다
-meta["world"] = 구역에 실제로 있는 것 -> 검증 / 디버깅용
+meta["visible"] = 카메라에 보이는 것 -> DummyDetector가 이것을 보고한다
+meta["world"]   = 구역에 실제로 있는 것 (정답) -> 검증 / 디버깅용
 """
 
 import cv2
@@ -18,7 +18,7 @@ import numpy as np
 
 from psafe.core.clock import Clock
 from psafe.core.packets import Detection, FramePacket
-from psafe.sources.base import SOURCES, Source
+from psafe.sources.source_api import SOURCES, Source
 from psafe.sources.scenario import Scenario, load_scenario
 
 COLORS = {"car": (200, 120, 40), "person": (60, 200, 60)}  # BGR
@@ -97,7 +97,7 @@ class DummySource(Source):
             timestamp=self._start + idx / sc.fps,
             source_id=self.source_id,
             image=image,
-            meta={"gt": visible, "world": world, "scenario_t": t_rel},
+            meta={"visible": visible, "world": world, "scenario_t": t_rel},
         )
 
     def _scenario_time(self, idx: int) -> float | None:

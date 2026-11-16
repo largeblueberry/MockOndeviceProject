@@ -34,9 +34,9 @@ health:
   max_brightness: 245
   freeze_diff_threshold: 0.05       # PC 웹캠 정지 장면 노이즈 0.20-0.28 (2026-11-14). 멈춘 카메라는 ~0
   freeze_frames: 15                # 30 fps 기준 ~0.5초. 1로 두면 실제 웹캠에서 frozen_frame 오탐 발생 (2026-11-14)
-  max_decision_age_ms: 600
 
 runner:
   mode: threaded
   heartbeat_ms: 200
+  max_decision_age_ms: 600
   metrics_interval_s: 5

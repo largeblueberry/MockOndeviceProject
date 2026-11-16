@@ -20,7 +20,7 @@ Source ──▶ HealthMonitor ──▶ Detector ──▶ SafetyFSM ──▶ 
 
 | 영역 | 구현 | 역할 |
 |---|---|---|
-| **core** | `packets.py` | 모듈 사이에 주고받는 데이터 형식(FramePacket, Detections, Decision, State) — **팀 공유용 인터페이스** |
+| **core** | `packets.py` | 모듈 사이에 주고받는 데이터 형식(FramePacket, FrameDetections, Decision, State) — **팀 공유용 인터페이스** |
 | | `slot.py` | 최신 프레임 1장만 유지하는 LatestSlot (지연 누적 방지) |
 | | `clock.py` | RealClock / FakeClock (시간을 주입해서 테스트가 결정적으로 돌아감) |
 | | `config.py`, `registry.py` | YAML 설정 → 부품 조립. 오타 키는 에러 |
@@ -28,7 +28,7 @@ Source ──▶ HealthMonitor ──▶ Detector ──▶ SafetyFSM ──▶ 
 | | webcam, video | 실제 웹캠, 녹화 영상 파일 |
 | **models** | dummy | 감지 누락·오감지·지연을 일부러 넣는 가짜 모델 |
 | | yolo_onnx | YOLO11n ONNX (전처리 letterbox, 후처리 NMS를 numpy로 직접 구현) |
-| **fsm** | machine.py | 안전 상태 기계 INIT / OCCUPIED / VERIFYING / CLEAR / FAULT |
+| **safety** | fsm.py | 안전 상태 기계 INIT / OCCUPIED / VERIFYING / CLEAR / FAULT |
 | | roi.py | 감시 구역(다각형) 판정 — 닿기만 해도 포함 |
 | | health.py | 카메라 이상 감지: 너무 어두움 / 너무 밝음 / 화면 정지 / 빈 프레임 |
 | **outputs** | console, viewer | 상태 변화 로그, 박스·ROI·Y/N 배너 표시, 녹화 |
@@ -125,9 +125,9 @@ Source ──▶ HealthMonitor ──▶ Detector ──▶ SafetyFSM ──▶ 
 - 차량 내부 잔류자 포함 여부, 입출차 구분, ESP32 출력 장치, 보조 센서
 
 ### 4.4 커밋 안 된 변경
-M3.5 이후 작업분(DESIGN.md, outputs/base.py 등) + 오늘 수정(health.py 측정값 로깅, runners.py 상태 줄, webcam_yolo.yaml 기준값, 이 파일).
+M3.5 이후 작업분(DESIGN.md, outputs/output_api.py 등) + 오늘 수정(health.py 측정값 로깅, runners.py 상태 줄, webcam_yolo.yaml 기준값, 이 파일).
 
 ---
 
 ## 팀 공유 원칙
-코드는 그대로 넘기지 않는다. 공유: 인터페이스(`core/packets.py`, 각 `base.py`) + `docs/DESIGN.md` + 이 파일의 §2~3 (실험 결과와 교훈).
+코드는 그대로 넘기지 않는다. 공유: 인터페이스(`core/packets.py`, 각 `*_api.py`) + `docs/DESIGN.md` + 이 파일의 §2~3 (실험 결과와 교훈).

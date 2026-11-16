@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from psafe.core.packets import Decision, Detections, FramePacket
+from psafe.core.packets import Decision, FrameDetections, FramePacket
 from psafe.core.registry import Registry
 
 
@@ -22,7 +22,7 @@ class Output(ABC):
     @abstractmethod
     def send(self, decision: Decision) -> None: ...
 
-    def on_frame(self, pkt: FramePacket, dets: Detections | None, decision: Decision) -> None: ...
+    def on_frame(self, pkt: FramePacket, dets: FrameDetections | None, decision: Decision) -> None: ...
 
     def poll(self) -> bool:
         return True

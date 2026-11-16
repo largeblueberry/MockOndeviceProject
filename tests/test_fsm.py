@@ -1,8 +1,8 @@
 import pytest
 
 from psafe.core.config import FsmConfig
-from psafe.core.packets import Detection, Detections, State
-from psafe.fsm import SafetyFSM
+from psafe.core.packets import Detection, FrameDetections, State
+from psafe.safety import SafetyFSM
 
 FPS = 10
 PERSON = Detection("person", 0.9, (0.4, 0.3, 0.6, 0.8))
@@ -18,7 +18,7 @@ class Driver:
 
     def frame(self, *objs, fault=None, age=0.0):
         t = self.seq / FPS
-        d = self.fsm.step(Detections(self.seq, t, tuple(objs), "t", 0.0), t + age, fault)
+        d = self.fsm.step(FrameDetections(self.seq, t, tuple(objs), "t", 0.0), t + age, fault)
         self.seq += 1
         return d
 

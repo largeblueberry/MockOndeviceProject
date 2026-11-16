@@ -134,7 +134,7 @@
 | `image` | ndarray (H×W×3, BGR, uint8) | 원본 또는 전처리된 이미지 |
 | `meta` | dict | 부가 정보. **Dummy 소스는 여기에 정답(ground truth)을 실음** |
 
-### 4.2 Detections (Model → FSM)
+### 4.2 FrameDetections (Model → FSM)
 | 필드 | 타입 | 설명 |
 |---|---|---|
 | `seq`, `timestamp` | | FramePacket에서 그대로 전달 |
@@ -174,7 +174,7 @@ Detector ◄───────┼─ YoloNcnnDetector    (YOLO + NCNN, RPi에
 |---|---|
 | `load(config)` | 가중치 로드, 런타임 초기화 |
 | `warmup()` | 첫 추론 지연 제거용 더미 추론 |
-| `predict(frame_packet) -> Detections` | **전처리 + 추론 + 후처리(NMS, 좌표 정규화, 클래스명 통일)** 까지 책임 |
+| `predict(frame_packet) -> FrameDetections` | **전처리 + 추론 + 후처리(NMS, 좌표 정규화, 클래스명 통일)** 까지 책임 |
 | `close()` | 자원 해제 |
 
 - 클래스명은 내부 표준(`"person"`, `"car"`)으로 통일해서 내보낸다. 파인튜닝 모델이 `"minifig"` 를 내더라도 Detector가 `"person"` 으로 매핑 → FSM 무수정.
@@ -374,7 +374,7 @@ fsm:
   person_conf_low: 0.30
   clear_time_s: 3.0
   clear_min_frames: 10
-  max_frame_age_ms: 500
+  max_frame_age_ms: 500     # 프레임 유효 기간: 이보다 오래된 프레임, 또는 이 시간 동안 프레임 없음 → FAULT
   fault_recover_frames: 5
   roi: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]
 health:
@@ -382,11 +382,11 @@ health:
   max_brightness: 245
   freeze_diff_threshold: 0.5   # 평균 픽셀 차이가 이보다 작으면 "같은 프레임"
   freeze_frames: 1             # 연속 몇 장이면 FAULT (1 = 가장 엄격, 실제 카메라에서 튜닝)
-  max_decision_age_ms: 600
 runner:
   mode: sync                # sync | threaded
   clock: auto               # auto(sync→fake, threaded→real) | real | fake
   heartbeat_ms: 200
+  max_decision_age_ms: 600  # heartbeat가 보낼 판단이 이보다 오래되면 N
   metrics_interval_s: 5
 ```
 
@@ -401,10 +401,10 @@ bootcampProject/
 ├── scenarios/             # Dummy 시나리오 정의
 ├── src/psafe/
 │   ├── core/              # 패킷, LatestSlot, Clock(Real/Fake), config 로딩, 메트릭
-│   ├── sources/           # base, dummy, video, webcam, picamera
-│   ├── models/            # base(인터페이스), registry, dummy, yolo_onnx (전처리 포함)
-│   ├── fsm/               # 상태 머신, ROI, health check (순수 로직)
-│   ├── outputs/           # base, console, serial(ESP32), mock_mcu, protocol(패킷 인코딩)
+│   ├── sources/           # source_api(인터페이스), dummy, video, webcam, picamera
+│   ├── detectors/         # detector_api(인터페이스), dummy, yolo_onnx (전처리 포함)
+│   ├── safety/            # fsm(상태 머신), roi, health (순수 로직)
+│   ├── outputs/           # output_api(인터페이스), console, serial(ESP32), mock_mcu, protocol(패킷 인코딩)
 │   ├── runners.py         # ThreadedRunner, SyncRunner
 │   └── __main__.py        # python -m psafe --config config/default.yaml
 ├── firmware/esp32/        # ESP32 펌웨어 (워치독 + 출력)

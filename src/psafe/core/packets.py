@@ -30,7 +30,7 @@ class FramePacket:
 
 
 @dataclass(frozen=True, slots=True)
-class Detections:
+class FrameDetections:
     seq: int
     timestamp: float
     objects: tuple[Detection, ...]

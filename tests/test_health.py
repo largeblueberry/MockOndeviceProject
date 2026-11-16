@@ -4,7 +4,7 @@ import yaml
 
 from psafe.core.config import HealthConfig
 from psafe.core.packets import FramePacket
-from psafe.fsm import HealthMonitor
+from psafe.safety import HealthMonitor
 from psafe.scenario_check import check, config_for_scenario
 from psafe.app import build
 from psafe.core.clock import FakeClock

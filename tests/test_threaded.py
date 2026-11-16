@@ -9,9 +9,9 @@ import pytest
 from psafe.app import build
 from psafe.core.config import parse_config
 from psafe.core.packets import Decision
-from psafe.models.base import Detector
-from psafe.models.dummy import DummyDetector
-from psafe.outputs.base import Output
+from psafe.detectors.detector_api import Detector
+from psafe.detectors.dummy import DummyDetector
+from psafe.outputs.output_api import Output
 from psafe.runners import ThreadedRunner
 from psafe.scenario_check import run_scenario
 from psafe.sources.scenario import parse_scenario

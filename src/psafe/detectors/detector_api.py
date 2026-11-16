@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from psafe.core.packets import Detections, FramePacket
+from psafe.core.packets import FrameDetections, FramePacket
 from psafe.core.registry import Registry
 
 
@@ -19,7 +19,7 @@ class Detector(ABC):
     def warmup(self) -> None: ...
 
     @abstractmethod
-    def predict(self, pkt: FramePacket) -> Detections: ...
+    def predict(self, pkt: FramePacket) -> FrameDetections: ...
 
     def close(self) -> None: ...
 

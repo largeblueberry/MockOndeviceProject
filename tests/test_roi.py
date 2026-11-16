@@ -1,6 +1,6 @@
 import pytest
 
-from psafe.fsm.roi import Roi
+from psafe.safety.roi import Roi
 
 SQUARE = Roi([[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]])
 TRIANGLE = Roi([[0.5, 0.0], [1.0, 1.0], [0.0, 1.0]])

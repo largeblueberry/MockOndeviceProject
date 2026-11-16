@@ -11,16 +11,16 @@ import threading
 import cv2
 import numpy as np
 
-from psafe.core.packets import Decision, Detections, FramePacket
-from psafe.fsm.roi import Roi
-from psafe.outputs.base import OUTPUTS, Output
+from psafe.core.packets import Decision, FrameDetections, FramePacket
+from psafe.safety.roi import Roi
+from psafe.outputs.output_api import OUTPUTS, Output
 
 log = logging.getLogger("psafe.output.viewer")
 
 GREEN, RED, ORANGE, GREY, YELLOW, WHITE = (60, 180, 60), (40, 40, 220), (0, 140, 255), (160, 160, 160), (0, 220, 255), (255, 255, 255)
 
 
-def annotate(img: np.ndarray, roi: Roi, dets: Detections | None, decision: Decision,
+def annotate(img: np.ndarray, roi: Roi, dets: FrameDetections | None, decision: Decision,
              person_conf_low: float = 0.0) -> np.ndarray:
     out = img.copy()
     h, w = out.shape[:2]
@@ -79,7 +79,7 @@ class ViewerOutput(Output):
         with self._lock:
             self._heartbeat = decision
 
-    def on_frame(self, pkt: FramePacket, dets: Detections | None, decision: Decision) -> None:
+    def on_frame(self, pkt: FramePacket, dets: FrameDetections | None, decision: Decision) -> None:
         frame = annotate(pkt.image, self.roi, dets, decision, self.person_conf_low)
         if self.scale != 1.0:
             frame = cv2.resize(frame, None, fx=self.scale, fy=self.scale)

@@ -17,10 +17,10 @@ import time
 import cv2
 import numpy as np
 
-from psafe.core.packets import Detection, Detections, FramePacket
-from psafe.models.base import DETECTORS, Detector
+from psafe.core.packets import Detection, FrameDetections, FramePacket
+from psafe.detectors.detector_api import DETECTORS, Detector
 
-log = logging.getLogger("psafe.model.yolo")
+log = logging.getLogger("psafe.detector.yolo")
 
 COCO80 = (
     "person bicycle car motorcycle airplane bus train truck boat traffic_light fire_hydrant stop_sign "
@@ -179,7 +179,7 @@ class YoloOnnxDetector(Detector):
         for _ in range(2):
             self._session.run(None, {self._input_name: dummy})
 
-    def predict(self, pkt: FramePacket) -> Detections:
+    def predict(self, pkt: FramePacket) -> FrameDetections:
         assert self._session is not None and self.input_size, "load() first"
         t0 = time.perf_counter()   # 측정용일 뿐, 판단에는 쓰지 않는다
         img = pkt.image
@@ -190,7 +190,7 @@ class YoloOnnxDetector(Detector):
         if self.classes is not None:
             objs = [o for o in objs if o.cls in self.classes]
         infer_ms = (time.perf_counter() - t0) * 1000
-        return Detections(pkt.seq, pkt.timestamp, tuple(objs), self.name, infer_ms)
+        return FrameDetections(pkt.seq, pkt.timestamp, tuple(objs), self.name, infer_ms)
 
     def close(self) -> None:
         self._session = None

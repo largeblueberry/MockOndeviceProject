@@ -3,9 +3,9 @@ import numpy as np
 import pytest
 
 from psafe.core.clock import FakeClock
-from psafe.core.packets import Decision, Detection, Detections, FramePacket, State
+from psafe.core.packets import Decision, Detection, FrameDetections, FramePacket, State
 from psafe.outputs.viewer import ViewerOutput, annotate
-from psafe.fsm.roi import Roi
+from psafe.safety.roi import Roi
 from psafe.sources.video import VideoFileSource
 
 FPS, N = 10, 20
@@ -66,7 +66,7 @@ def test_missing_file():
 def test_annotate_and_record(tmp_path):
     roi = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]
     img = np.full((120, 160, 3), 90, np.uint8)
-    dets = Detections(0, 0.0, (Detection("person", 0.9, (0.4, 0.3, 0.6, 0.8)),), "m", 12.0)
+    dets = FrameDetections(0, 0.0, (Detection("person", 0.9, (0.4, 0.3, 0.6, 0.8)),), "m", 12.0)
     dec = Decision(False, State.OCCUPIED, "person_in_roi", 0, 0.0, 0.0)
 
     out = annotate(img, Roi(roi), dets, dec)

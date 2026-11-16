@@ -17,7 +17,7 @@ import yaml
 from psafe.app import build
 from psafe.core.config import AppConfig, parse_config
 from psafe.core.packets import Decision
-from psafe.fsm.roi import Roi
+from psafe.safety.roi import Roi
 from psafe.runners import RunResult, SyncRunner, ThreadedRunner
 from psafe.sources.scenario import Scenario, load_scenario
 

@@ -1,7 +1,7 @@
 import logging
 
 from psafe.core.packets import Decision
-from psafe.outputs.base import OUTPUTS, Output
+from psafe.outputs.output_api import OUTPUTS, Output
 
 log = logging.getLogger("psafe.output.console")
 

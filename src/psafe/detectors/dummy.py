@@ -11,8 +11,8 @@
 import random
 
 from psafe.core.clock import Clock
-from psafe.core.packets import Detection, Detections, FramePacket
-from psafe.models.base import DETECTORS, Detector
+from psafe.core.packets import Detection, FrameDetections, FramePacket
+from psafe.detectors.detector_api import DETECTORS, Detector
 
 
 @DETECTORS.register("dummy")
@@ -43,17 +43,17 @@ class DummyDetector(Detector):
     def load(self) -> None:
         self._rng = random.Random(self.seed)
 
-    def predict(self, pkt: FramePacket) -> Detections:
-        if "gt" not in pkt.meta:
-            raise ValueError("DummyDetector needs ground truth in meta['gt'] (use the dummy source)")
+    def predict(self, pkt: FramePacket) -> FrameDetections:
+        if "visible" not in pkt.meta:
+            raise ValueError("DummyDetector needs ground truth in meta['visible'] (use the dummy source)")
         rng = self._rng
         objects = [
             Detection(d.cls, self.conf, d.bbox)
-            for d in pkt.meta["gt"]
+            for d in pkt.meta["visible"]
             if not (self.miss_rate and rng.random() < self.miss_rate)
         ]
         if self.false_rate and rng.random() < self.false_rate:
             x, y = rng.uniform(0.0, 0.85), rng.uniform(0.0, 0.6)
             objects.append(Detection("person", self.conf * 0.5, (x, y, x + 0.15, y + 0.4)))
         self.clock.sleep(self.latency_ms / 1000.0)
-        return Detections(pkt.seq, pkt.timestamp, tuple(objects), self.name, infer_ms=self.latency_ms)
+        return FrameDetections(pkt.seq, pkt.timestamp, tuple(objects), self.name, infer_ms=self.latency_ms)

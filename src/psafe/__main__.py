@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
             cfg.runner.mode = args.mode
             if cfg.runner.clock == "fake" and args.mode == "threaded":
                 cfg.runner.clock = "real"
-        c = build(cfg)
+        c = build(cfg)  #app.py 호출. config.yaml에 따라 부품을 생성한다.
     except (ConfigError, FileNotFoundError, ValueError) as e:
         logging.error("config error: %s", e)
         return 2

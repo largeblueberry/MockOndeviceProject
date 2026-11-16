@@ -6,8 +6,8 @@ from psafe.app import build
 from psafe.core.clock import FakeClock
 from psafe.core.config import load_config
 from psafe.core.packets import Decision
-from psafe.models import DETECTORS
-from psafe.outputs.base import Output
+from psafe.detectors import DETECTORS
+from psafe.outputs.output_api import Output
 from psafe.runners import SyncRunner
 from psafe.sources.dummy import DummySource
 from psafe.sources.scenario import parse_scenario
@@ -44,7 +44,7 @@ def test_dummy_source_attaches_ground_truth_on_timeline():
     src = DummySource(FakeClock(), sc, width=64, height=48)
     frames = [src.read() for _ in range(20)]
     assert src.read() is None                    # 시나리오 종료
-    assert [len(f.meta["gt"]) for f in frames] == [0] * 10 + [1] * 10
+    assert [len(f.meta["visible"]) for f in frames] == [0] * 10 + [1] * 10
     assert frames[0].image.shape == (48, 64, 3)
     assert frames[15].timestamp == pytest.approx(1.5)
 

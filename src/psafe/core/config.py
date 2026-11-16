@@ -26,6 +26,9 @@ class FsmConfig:
     person_conf_low: float = 0.30
     clear_time_s: float = 3.0
     clear_min_frames: int = 10
+    # 프레임 정보의 유효 기간. 두 곳에서 같은 의미로 쓴다:
+    #   FSM    - 도착한 프레임이 이보다 오래되었으면 FAULT (stale_frame)
+    #   Runner - 이 시간 동안 새 프레임이 없으면 마지막 정보가 만료된 것이므로 FAULT (no_frame)
     max_frame_age_ms: float = 500.0
     fault_recover_frames: int = 5
     roi: list[list[float]] = field(
@@ -39,7 +42,6 @@ class HealthConfig:
     max_brightness: float = 245.0
     freeze_diff_threshold: float = 0.5   # 픽셀 평균 절대 차이가 이 값 미만이면 "같은 프레임"
     freeze_frames: int = 1               # 같은 프레임이 몇 장 연속이면 FAULT (1 = 가장 엄격)
-    max_decision_age_ms: float = 600.0
 
 
 @dataclass
@@ -47,6 +49,7 @@ class RunnerConfig:
     mode: str = "sync"            # sync | threaded
     clock: str = "auto"           # auto | real | fake  (auto: sync면 fake, threaded면 real)
     heartbeat_ms: float = 200.0
+    max_decision_age_ms: float = 600.0   # heartbeat가 보낼 판단이 이보다 오래되면 N (worker 멈춤 감지)
     metrics_interval_s: float = 5.0
 
 

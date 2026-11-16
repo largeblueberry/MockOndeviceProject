@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from psafe.core.packets import FramePacket
-from psafe.models.yolo_onnx import COCO80, decode, letterbox, names_from_metadata, nms, to_blob
+from psafe.detectors.yolo_onnx import COCO80, decode, letterbox, names_from_metadata, nms, to_blob
 
 NAMES = ["person", "car"]
 
@@ -77,7 +77,7 @@ WEIGHTS = Path("models/yolo11n_320.onnx")
 
 @pytest.mark.skipif(not WEIGHTS.exists(), reason=f"{WEIGHTS} not downloaded")
 def test_real_model_loads_and_runs():
-    from psafe.models.yolo_onnx import YoloOnnxDetector
+    from psafe.detectors.yolo_onnx import YoloOnnxDetector
     det = YoloOnnxDetector(str(WEIGHTS))
     det.load()
     det.warmup()

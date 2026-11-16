@@ -10,10 +10,12 @@
 
 | 표시 | 의미 | 대상 파일 |
 |---|---|---|
-| 🔓 **계약** | 팀에 공유되는 파일. 모듈 간 **데이터 형식**과 **인터페이스**를 정의한다 | `core/packets.py`, `sources/base.py`, `models/base.py`, `outputs/base.py` |
+| 🔓 **계약** | 팀에 공유되는 파일. 모듈 간 **데이터 형식**과 **인터페이스**를 정의한다 | `core/packets.py`, `sources/source_api.py`, `detectors/detector_api.py`, `outputs/output_api.py` |
 | 🔨 **구현** | 각 담당자가 구현하는 파일. 본 문서는 입력과 출력만 기술한다 | 그 외 전부 |
 
 모든 부품은 계약(🔓)을 통해서만 상호작용한다. 따라서 개별 구현 내용을 몰라도 전체 흐름을 파악할 수 있다.
+
+비슷한 이름과 용어의 구분은 §9 용어 정리를 참고한다.
 
 ---
 
@@ -26,15 +28,15 @@
 ```mermaid
 flowchart LR
     SRC["📷 Source<br/>sources/*"]
-    HM["🩺 HealthMonitor<br/>fsm/health.py"]
-    DET["🧠 Detector<br/>models/*"]
-    FSM["⚖️ SafetyFSM<br/>fsm/machine.py<br/>(+ fsm/roi.py)"]
+    HM["🩺 HealthMonitor<br/>safety/health.py"]
+    DET["🧠 Detector<br/>detectors/*"]
+    FSM["⚖️ SafetyFSM<br/>safety/fsm.py<br/>(+ safety/roi.py)"]
     OUT["📤 Output<br/>outputs/*"]
 
     SRC -- "FramePacket" --> HM
     SRC -- "FramePacket" --> DET
     HM -- "fault 사유 (str 또는 None)" --> FSM
-    DET -- "Detections" --> FSM
+    DET -- "FrameDetections" --> FSM
     FSM -- "Decision (Y/N)" --> OUT
 ```
 
@@ -57,12 +59,12 @@ flowchart BT
     end
 
     subgraph L1["② 부품 — 상호 독립"]
-        sbase["🔓 sources/base.py"]
-        mbase["🔓 models/base.py"]
-        obase["🔓 outputs/base.py"]
-        fsmpkg["fsm/<br/>machine · roi · health"]
+        sbase["🔓 sources/source_api.py"]
+        mbase["🔓 detectors/detector_api.py"]
+        obase["🔓 outputs/output_api.py"]
+        fsmpkg["safety/<br/>fsm · roi · health"]
         simpl["sources/<br/>dummy · webcam · video · scenario"]
-        mimpl["models/<br/>dummy · yolo_onnx"]
+        mimpl["detectors/<br/>dummy · yolo_onnx"]
         oimpl["outputs/<br/>console · viewer"]
     end
 
@@ -116,24 +118,24 @@ src/psafe/
 │   └── slot.py          LatestSlot (스레드 간 최신 프레임 전달)
 │
 ├── sources/             ② 프레임 생성          read() → FramePacket
-│   ├── base.py      🔓  Source 인터페이스, SOURCES 레지스트리
+│   ├── source_api.py 🔓 Source 인터페이스, SOURCES 레지스트리
 │   ├── dummy.py         가상 장면 생성 (시나리오 재생)
 │   ├── scenario.py      시나리오 YAML 파싱
 │   ├── webcam.py        웹캠 입력
 │   └── video.py         영상 파일 입력
 │
-├── models/              ② 객체 검출            predict(FramePacket) → Detections
-│   ├── base.py      🔓  Detector 인터페이스, DETECTORS 레지스트리
+├── detectors/           ② 객체 검출            predict(FramePacket) → FrameDetections
+│   ├── detector_api.py 🔓 Detector 인터페이스, DETECTORS 레지스트리
 │   ├── dummy.py         노이즈를 주입하는 가상 검출기
 │   └── yolo_onnx.py     YOLO (ONNX)
 │
-├── fsm/                 ② 판단 (순수 로직, 입출력 없음)
-│   ├── machine.py       SafetyFSM: step(Detections) → Decision
+├── safety/              ② 판단 (순수 로직, 입출력 없음)
+│   ├── fsm.py           SafetyFSM: step(FrameDetections) → Decision
 │   ├── roi.py           감시 구역 포함 판정
 │   └── health.py        카메라 상태 검사: check(FramePacket) → 사유 또는 None
 │
 ├── outputs/             ② 결과 출력            send(Decision)
-│   ├── base.py      🔓  Output 인터페이스, OUTPUTS 레지스트리
+│   ├── output_api.py 🔓 Output 인터페이스, OUTPUTS 레지스트리
 │   ├── console.py       로그 출력
 │   └── viewer.py        화면 표시 및 녹화
 │
@@ -172,11 +174,11 @@ flowchart TD
 Components
 ├── cfg       : AppConfig        전체 설정
 ├── clock     : Clock            RealClock 또는 FakeClock
-├── source    : Source           🔓 sources/base.py
-├── detector  : Detector         🔓 models/base.py
-├── health    : HealthMonitor    fsm/health.py
-├── fsm       : SafetyFSM        fsm/machine.py
-└── outputs   : list[Output]     🔓 outputs/base.py (복수 가능)
+├── source    : Source           🔓 sources/source_api.py
+├── detector  : Detector         🔓 detectors/detector_api.py
+├── health    : HealthMonitor    safety/health.py
+├── fsm       : SafetyFSM        safety/fsm.py
+└── outputs   : list[Output]     🔓 outputs/output_api.py (복수 가능)
 ```
 
 ---
@@ -185,7 +187,7 @@ Components
 
 ### 3.1 인터페이스 (ABC)
 
-`base.py`의 클래스는 동작 코드를 거의 포함하지 않는다. 구현체가 지켜야 할 메서드와 반환 타입만 정의한다.
+`*_api.py`의 클래스는 동작 코드를 거의 포함하지 않는다. 구현체가 지켜야 할 메서드와 반환 타입만 정의한다.
 
 ```
 Source (인터페이스)     ← Runner가 참조하는 타입
@@ -194,7 +196,7 @@ Source (인터페이스)     ← Runner가 참조하는 타입
  └── VideoFileSource
 ```
 
-`@abstractmethod`가 붙은 메서드는 모든 구현체가 반드시 구현해야 한다. 구현 파일을 읽기 전에 해당 `base.py`를 먼저 확인하면 각 메서드의 역할을 파악하기 쉽다.
+`@abstractmethod`가 붙은 메서드는 모든 구현체가 반드시 구현해야 한다. 구현 파일을 읽기 전에 해당 `*_api.py`를 먼저 확인하면 각 메서드의 역할을 파악하기 쉽다.
 
 ### 3.2 레지스트리
 
@@ -223,9 +225,9 @@ sequenceDiagram
 
 | 설정 위치 | 레지스트리 | 등록된 이름 |
 |---|---|---|
-| `source.name` | `SOURCES` (`sources/base.py`) | `dummy`, `webcam`, `video` |
-| `model.name` | `DETECTORS` (`models/base.py`) | `dummy`, `yolo_onnx` |
-| `outputs[].name` | `OUTPUTS` (`outputs/base.py`) | `console`, `viewer` |
+| `source.name` | `SOURCES` (`sources/source_api.py`) | `dummy`, `webcam`, `video` |
+| `model.name` | `DETECTORS` (`detectors/detector_api.py`) | `dummy`, `yolo_onnx` |
+| `outputs[].name` | `OUTPUTS` (`outputs/output_api.py`) | `console`, `viewer` |
 | `fsm`, `health`, `runner` | 해당 없음 (고정 클래스) | `core/config.py`의 `FsmConfig` 등 |
 
 ### 3.3 의존성 주입
@@ -274,8 +276,8 @@ sequenceDiagram
         DT--xRN: Exception
         RN->>FS: fault("detector_error")
     else 정상
-        DT-->>RN: Detections
-        RN->>FS: step(Detections, now, fault)
+        DT-->>RN: FrameDetections
+        RN->>FS: step(FrameDetections, now, fault)
     end
     FS-->>RN: Decision
 ```
@@ -343,10 +345,10 @@ flowchart LR
 ```mermaid
 flowchart TD
     S0["0 · 실행 확인"] --> S1
-    S1["1 · 계약 🔓<br/>core/packets.py → 각 base.py"] --> S2
+    S1["1 · 계약 🔓<br/>core/packets.py → 각 `*_api.py`"] --> S2
     S2["2 · 조립<br/>__main__.py → app.py → core/registry.py<br/>+ config/default.yaml"] --> S3
     S3["3 · 실행 루프<br/>runners.py: process_frame → SyncRunner"] --> S4
-    S4["4 · 판단<br/>DESIGN.md §8 → fsm/"] --> S5
+    S4["4 · 판단<br/>DESIGN.md §8 → safety/"] --> S5
     S5["5 · 실시간 처리<br/>ThreadedRunner, core/slot.py, core/clock.py"] --> S6
     S6["6 · 담당 구현체"]
 ```
@@ -363,8 +365,8 @@ flowchart TD
 ### 1. 계약 🔓
 
 - `core/packets.py`: 파이프라인에서 사용하는 데이터 타입. §1.1의 각 화살표와 대응한다.
-- `sources/base.py`, `models/base.py`, `outputs/base.py`: 부품별 인터페이스. `@abstractmethod`가 필수 구현 메서드다.
-- `FramePacket`과 `Detections`의 `seq`, `timestamp`는 FSM이 오래되거나 순서가 뒤바뀐 프레임을 거부하는 데 사용된다.
+- `sources/source_api.py`, `detectors/detector_api.py`, `outputs/output_api.py`: 부품별 인터페이스. `@abstractmethod`가 필수 구현 메서드다.
+- `FramePacket`과 `FrameDetections`의 `seq`, `timestamp`는 FSM이 오래되거나 순서가 뒤바뀐 프레임을 거부하는 데 사용된다.
 - `Output`의 `send()`는 하트비트마다 호출되고, `on_frame()`은 프레임 처리마다 호출된다.
 
 ### 2. 조립
@@ -380,13 +382,13 @@ flowchart TD
 
 ### 4. 판단
 
-`DESIGN.md §8`의 상태 정의(INIT / OCCUPIED / VERIFYING / CLEAR / FAULT)를 먼저 참고한다. `fsm/` 모듈의 책임은 다음과 같다.
+`DESIGN.md §8`의 상태 정의(INIT / OCCUPIED / VERIFYING / CLEAR / FAULT)를 먼저 참고한다. `safety/` 패키지의 책임은 다음과 같다.
 
 | 파일 | 책임 | 입력 → 출력 |
 |---|---|---|
 | `health.py` | 카메라 화면 이상 검사 (암전, 과노출, 화면 정지) | `FramePacket` → 사유 문자열 또는 `None` |
 | `roi.py` | 검출 박스와 감시 구역의 접촉 여부 판정 | `bbox` → `bool` |
-| `machine.py` | 상태 전이 및 최종 Y/N 결정 | `Detections`, fault → `Decision` |
+| `fsm.py` | 상태 전이 및 최종 Y/N 결정 | `FrameDetections`, fault → `Decision` |
 
 판단 규칙은 비대칭이다. 사람이 한 프레임이라도 검출되면 즉시 N이 되고, Y는 `clear_time_s` **및** `clear_min_frames` 조건을 모두 만족해야 출력된다. FAULT에서 복구할 때는 반드시 VERIFYING을 거친다.
 
@@ -398,7 +400,7 @@ flowchart TD
 
 ### 6. 담당 구현체
 
-담당 파트의 `base.py` 인터페이스에 맞춰 구현한 뒤, 다음 순서로 확인한다.
+담당 파트의 `*_api.py` 인터페이스에 맞춰 구현한 뒤, 다음 순서로 확인한다.
 
 1. `config/*.yaml`의 `name`을 구현체의 등록 이름으로 변경한다.
 2. `--scenario "scenarios/*.yaml" --check`로 전체 시나리오를 검증한다.
@@ -413,9 +415,9 @@ flowchart TD
 | 프로그램 진입점 | `__main__.py`, §2.1 |
 | 설정 이름과 클래스의 매핑 | `core/registry.py`, 각 패키지의 `__init__.py`, §3.2 |
 | 모듈 간 데이터 형식 | 🔓 `core/packets.py` |
-| 새 Source / Detector / Output 추가 | 해당 패키지의 🔓 `base.py` 상속 → `@register` → `__init__.py`에 import 추가 |
-| Y가 출력되지 않는 원인 | `fsm/machine.py`(VERIFYING 조건), 로그의 `reason` 값, DESIGN.md §8.2.1 |
-| 카메라 이상으로 인한 FAULT | `fsm/health.py`, 설정의 `health` 블록 |
+| 새 Source / Detector / Output 추가 | 해당 패키지의 🔓 `*_api.py` 상속 → `@register` → `__init__.py`에 import 추가 |
+| Y가 출력되지 않는 원인 | `safety/fsm.py`(VERIFYING 조건), 로그의 `reason` 값, DESIGN.md §8.2.1 |
+| 카메라 이상으로 인한 FAULT | `safety/health.py`, 설정의 `health` 블록 |
 | 감시 구역 변경 | 설정의 `fsm.roi` (0~1 정규화 좌표) |
 | 스레드 구성 | `runners.py`의 `ThreadedRunner`, §4.3, DESIGN.md §3.3 |
 | 시간 추상화 | `core/clock.py`, §3.4 |
@@ -450,4 +452,91 @@ flowchart TD
 
 1. **FAULT 발생:** `scenarios/camera_outage.yaml`은 5~7초 구간에 카메라 프레임이 중단되는 시나리오다. 실행 로그에서 `CLEAR → FAULT → VERIFYING → CLEAR` 순서의 상태 변화를 확인할 수 있다.
 2. **판정 시간 변경:** `config/default.yaml`의 `fsm.clear_time_s`를 변경한 뒤 `--check`를 실행하면, 시간 조건에 의존하는 expect 항목이 실패한다.
-3. **Output 추가:** `outputs/base.py`의 `Output`을 상속하고 `@OUTPUTS.register`로 등록한 뒤 `outputs/__init__.py`에 import를 추가하면, YAML의 `outputs`에 이름을 지정하여 사용할 수 있다. `send()`는 판단 변경 여부와 관계없이 하트비트마다 호출된다.
+3. **Output 추가:** `outputs/output_api.py`의 `Output`을 상속하고 `@OUTPUTS.register`로 등록한 뒤 `outputs/__init__.py`에 import를 추가하면, YAML의 `outputs`에 이름을 지정하여 사용할 수 있다. `send()`는 판단 변경 여부와 관계없이 하트비트마다 호출된다.
+
+---
+
+## 9. 용어 정리
+
+이름이 비슷하거나 같은 개념을 여러 이름으로 부르는 경우를 정리한다.
+
+### 9.1 Y / N과 상태
+
+| 출력 | `Decision.safe` | `Decision.state` | 비고 |
+|---|---|---|---|
+| **Y** | `True` | `CLEAR` | Y가 나오는 유일한 상태 |
+| **N** | `False` | `INIT`, `OCCUPIED`, `VERIFYING`, `FAULT` | `core/packets.py`의 `unsafe()`는 N 판단을 만드는 단축 함수 |
+
+상태별 `reason` 값:
+
+| 상태 | `reason` | 의미 |
+|---|---|---|
+| `INIT` | `no_decision_yet` | 시작 직후, 아직 판단 없음 (heartbeat) |
+| `OCCUPIED` | `person_in_roi` | 감시 구역 안에 사람 검출 |
+| `VERIFYING` | `verifying` | 비어 있음 확인 중 (`clear_time_s`, `clear_min_frames` 미충족) |
+| `CLEAR` | `clear` | 비어 있음 확인 완료 |
+| `FAULT` | `empty_frame`, `too_dark`, `too_bright`, `frozen_frame` | 카메라 이상 (HealthMonitor) |
+| `FAULT` | `stale_frame`, `out_of_order`, `no_frame` | 입력 시간 이상 (SafetyFSM, Runner) |
+| `FAULT` | `detector_error` | 검출기 예외 (Runner) |
+| `FAULT` | `decision_stale` | worker 멈춤으로 판단이 오래됨 (heartbeat) |
+| `FAULT` | `recovering` | 이상 해소 후 정상 프레임 누적 중. **상태는 아직 FAULT**이며, `fault_recover_frames`장이 쌓이면 VERIFYING으로 넘어간다 |
+| `FAULT` | `shutdown` | 프로그램 종료 시 마지막 송신 |
+
+### 9.2 `fault`의 세 가지 쓰임
+
+| 표기 | 종류 | 의미 |
+|---|---|---|
+| `State.FAULT` | 상태 | FSM 상태 중 하나 |
+| `SafetyFSM.fault(reason, ...)` | 메서드 | 지정한 사유로 FAULT 상태에 진입 |
+| `SafetyFSM.step(..., fault=...)` | 인자 | HealthMonitor가 반환한 사유 문자열 (`None`이면 정상) |
+
+### 9.3 시각
+
+| 이름 | 의미 |
+|---|---|
+| `FramePacket.timestamp`, `FrameDetections.timestamp`, `Decision.timestamp` | 프레임 **촬영** 시각 |
+| `Decision.decided_at` | 판단을 내린 시각 |
+| `now` (인자) | 호출 시점의 `clock.now()` |
+
+모든 시각은 주입된 Clock 기준이며, 프레임 나이는 `now - timestamp`로 계산한다.
+
+### 9.4 시간 제한 설정
+
+| 설정 | 의미 | 사용처 |
+|---|---|---|
+| `fsm.max_frame_age_ms` | 프레임 정보의 유효 기간. 도착한 프레임이 이보다 오래되었거나(`stale_frame`), 이 시간 동안 새 프레임이 없으면(`no_frame`) FAULT | `safety/fsm.py`, `runners.py` |
+| `runner.max_decision_age_ms` | heartbeat가 보낼 판단의 유효 기간. 초과 시 `decision_stale` | `runners.py` (heartbeat) |
+| `runner.heartbeat_ms` | 판단 송신 주기 | `runners.py` (heartbeat) |
+| (ESP32) 500 ms | 유효 패킷 수신 한도. 초과 시 ESP32가 강제 N | 펌웨어 (DESIGN §7.3) |
+
+### 9.5 버려진 프레임 카운터 (`RunResult`, `DummySource`)
+
+| 이름 | 위치 | 의미 |
+|---|---|---|
+| `skipped` | Source | 소비자가 느려서 Source가 건너뛴 프레임 |
+| `dropped` | LatestSlot | worker가 가져가기 전에 덮어쓰인 프레임 |
+| `outage_frames` | DummySource | 카메라 끊김 구간이라 생성되지 않은 프레임 |
+| `timeouts` | Runner | 프레임 없이 대기 시간이 끝난 횟수 (`no_frame` 발생 횟수) |
+
+### 9.6 신뢰도 임계값 (2단계)
+
+| 설정 | 단계 | 역할 |
+|---|---|---|
+| `model.options.conf_threshold` (기본 0.20) | Detector | 후보를 넓게 남긴다. 화면 표시·로그에는 이 기준으로 보인다 |
+| `fsm.person_conf_low` (기본 0.30) | SafetyFSM | 이 값 이상인 `person`만 판단에 반영한다 |
+
+### 9.7 이름이 비슷한 항목
+
+| 이름 | 의미 |
+|---|---|
+| `Detection` | 검출 박스 1개 (`cls`, `conf`, `bbox`) |
+| `FrameDetections` | 프레임 1장의 검출 결과 묶음 (`Detection` 여러 개 + `seq`, `timestamp`, 모델 정보) |
+| `meta["visible"]` | DummySource: 카메라에 **보이는** 객체. DummyDetector가 이것을 보고한다 |
+| `meta["world"]` | DummySource: 구역에 **실제로 있는** 객체(정답). 안전 불변식 검사에 쓴다 |
+| `sources/dummy.py` | 가상 **입력** (`source.name: dummy`) |
+| `detectors/dummy.py` | 가상 **검출기** (`model.name: dummy`) |
+| `scenarios/*.yaml` | 시나리오 데이터 |
+| `sources/scenario.py` | 시나리오 파일 파싱 |
+| `scenario_check.py` | 시나리오 실행 및 `expect` 검증 |
+| `src/psafe/detectors/` | 검출기 코드 |
+| `models/` (저장소 루트) | ONNX 모델 파일 (git 제외) |

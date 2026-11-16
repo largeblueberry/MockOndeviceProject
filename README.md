@@ -58,9 +58,9 @@ Source ──▶ HealthMonitor ──▶ Detector ──▶ SafetyFSM ──▶ 
 | 구성 요소 | 역할 | 코드 | 설계 문서 |
 |---|---|---|---|
 | Source | 프레임 입력 (가상 시나리오, 웹캠, 영상 파일) | [`src/psafe/sources/`](src/psafe/sources/) | DESIGN §6 |
-| HealthMonitor | 카메라 이상 감지 (암전, 과노출, 화면 정지) | [`src/psafe/fsm/health.py`](src/psafe/fsm/health.py) | DESIGN §3.5 |
-| Detector | 객체 검출 (가상 모델, YOLO ONNX) | [`src/psafe/models/`](src/psafe/models/) | DESIGN §5 |
-| SafetyFSM | 상태 전이 및 Y/N 판정, 감시 구역(ROI) 판정 | [`src/psafe/fsm/`](src/psafe/fsm/) | DESIGN §8 |
+| HealthMonitor | 카메라 이상 감지 (암전, 과노출, 화면 정지) | [`src/psafe/safety/health.py`](src/psafe/safety/health.py) | DESIGN §3.5 |
+| Detector | 객체 검출 (가상 모델, YOLO ONNX) | [`src/psafe/detectors/`](src/psafe/detectors/) | DESIGN §5 |
+| SafetyFSM | 상태 전이 및 Y/N 판정, 감시 구역(ROI) 판정 | [`src/psafe/safety/`](src/psafe/safety/) | DESIGN §8 |
 | Outputs | 판정 결과 출력 | [`src/psafe/outputs/`](src/psafe/outputs/) | DESIGN §14.3 |
 | Runner | 부품 실행 루프 (Sync / Threaded) | [`src/psafe/runners.py`](src/psafe/runners.py) | DESIGN §3.4 |
 
@@ -161,10 +161,10 @@ YOLO 모델(`models/yolo11n_320.onnx` 등)은 저장소에 포함되지 않는�
 
 | 공유 대상 | 내용 |
 |---|---|
-| [`src/psafe/core/packets.py`](src/psafe/core/packets.py) | 모듈 간 데이터 형식 (FramePacket, Detections, Decision, State) |
-| [`src/psafe/sources/base.py`](src/psafe/sources/base.py) | Source 인터페이스 |
-| [`src/psafe/models/base.py`](src/psafe/models/base.py) | Detector 인터페이스 |
-| [`src/psafe/outputs/base.py`](src/psafe/outputs/base.py) | Output 인터페이스 |
+| [`src/psafe/core/packets.py`](src/psafe/core/packets.py) | 모듈 간 데이터 형식 (FramePacket, FrameDetections, Decision, State) |
+| [`src/psafe/sources/source_api.py`](src/psafe/sources/source_api.py) | Source 인터페이스 |
+| [`src/psafe/detectors/detector_api.py`](src/psafe/detectors/detector_api.py) | Detector 인터페이스 |
+| [`src/psafe/outputs/output_api.py`](src/psafe/outputs/output_api.py) | Output 인터페이스 |
 | [`docs/`](docs/) | 설계 · 구조 · 조사 문서 |
 
 모듈 분배안은 [`docs/DESIGN.md`](docs/DESIGN.md) §13을 참고한다.

@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 from psafe.core.clock import Clock, FakeClock, RealClock
 from psafe.core.config import AppConfig
-from psafe.fsm import HealthMonitor, SafetyFSM
-from psafe.models import DETECTORS, Detector
+from psafe.safety import HealthMonitor, SafetyFSM
+from psafe.detectors import DETECTORS, Detector
 from psafe.outputs import OUTPUTS, Output
 from psafe.sources import SOURCES, Source
 
