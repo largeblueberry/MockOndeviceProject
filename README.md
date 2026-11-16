@@ -31,7 +31,7 @@
 | 센서 | 카메라 |
 | 시연 환경 | 모형(레고 등) 기반 |
 | 최종 출력 | **Y**(동작 안전) / **N**(동작 불가) |
-| 개발 언어 | Python 3.11 |
+| 개발 언어 | Python 3.11 이상 (RPi: 3.13) |
 
 문제 배경과 근거는 [`docs/RESEARCH.md`](docs/RESEARCH.md) §0~1, 프로젝트 정의는 [`docs/DESIGN.md`](docs/DESIGN.md) §1을 참고한다.
 
@@ -112,6 +112,13 @@ py -3.11 -m venv .venv
 .venv\Scripts\pip install -e ".[dev,onnx,serial]"
 ```
 
+Raspberry Pi에서는 설치 후 OpenCV를 화면 없는 버전으로 바꾼다 (`libGL` 없이 동작):
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev,onnx,serial]"
+.venv/bin/pip uninstall -y opencv-python && .venv/bin/pip install opencv-python-headless
+```
+
 YOLO 모델(`models/yolo11n_320.onnx` 등)은 저장소에 포함되지 않는다. 준비 방법은 [`docs/DESIGN.md`](docs/DESIGN.md) §14.1을 참고한다. 가상 입력(`default.yaml`)은 모델 없이 실행된다.
 
 ### 5.2 실행
@@ -121,6 +128,7 @@ YOLO 모델(`models/yolo11n_320.onnx` 등)은 저장소에 포함되지 않는�
 .venv\Scripts\python -m psafe --scenario "scenarios/*.yaml" --check    # 전체 시나리오 검증
 .venv\Scripts\python -m psafe --config config/webcam_yolo.yaml         # 웹캠 + YOLO 실시간
 .venv\Scripts\python -m psafe.tools.camcheck                           # 카메라 측정
+.venv\Scripts\python -m psafe.tools.bench                              # 추론 속도 측정
 .venv\Scripts\python -m psafe.tools.mcucheck --list                    # 시리얼 포트 목록
 .venv\Scripts\python -m psafe.tools.mcucheck --port COM5               # ESP32 펌웨어 점검
 .venv\Scripts\python -m psafe --config config/serial_dummy.yaml        # 가상 판단 → ESP32
@@ -157,7 +165,7 @@ ESP32 펌웨어(`firmware/esp32/psafe_gate/`)는 PlatformIO(`pio run -t upload`,
 | M3.5 | ThreadedRunner (capture / worker / heartbeat) | 완료 |
 | M4 | YOLO ONNX 연결, 웹캠 · 영상 입력 | 진행 중 |
 | M4.5 | 시리얼 출력, 프로토콜 v1, MockMCU, ESP32 펌웨어, 점검 도구 | 완료 (실기 검증 EXP-006) |
-| M5 | Raspberry Pi 이식, 카메라, RPi ↔ ESP32 연결 | 예정 |
+| M5 | Raspberry Pi 이식, 카메라, RPi ↔ ESP32 연결 | 진행 중 (RPi 환경·속도 측정·Mock 연결 완료, 카메라 미정) |
 
 다음 작업은 [`docs/PROGRESS.md`](docs/PROGRESS.md) §4, 실험 결과와 알려진 한계는 [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md), 미결 사항은 [`docs/DESIGN.md`](docs/DESIGN.md) §15를 참고한다.
 

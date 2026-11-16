@@ -476,8 +476,8 @@ bootcampProject/
 
 | 영역 | 선택 | 비고 |
 |---|---|---|
-| 언어 | Python 3.11 | RPi OS Bookworm 기본 버전과 맞춤 |
-| 영상 처리 | `opencv-python`, `numpy` | 캡처(PC), 리사이즈, 시각화, 영상 파일 |
+| 언어 | Python 3.11 이상 | PC 3.11, RPi는 Debian 13(trixie) 기본 3.13 (2026-11-16 확인) |
+| 영상 처리 | `opencv-python`, `numpy` | 캡처(PC), 리사이즈, 시각화, 영상 파일. **RPi는 `opencv-python-headless`** (화면 없음, libGL 불필요) |
 | RPi 카메라 | `picamera2` (apt 설치) | Bookworm에선 CSI 카메라를 OpenCV로 직접 못 엶. venv는 `--system-site-packages` |
 | 추론 | `onnxruntime` | PC·RPi(aarch64) 동일 코드. 1순위 |
 | 추론 (가속 후보) | NCNN | RPi에서 더 빠를 가능성. 측정 후 결정 |

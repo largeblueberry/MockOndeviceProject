@@ -41,6 +41,7 @@ Source ──▶ HealthMonitor ──▶ Detector ──▶ SafetyFSM ──▶ 
 | **도구** | `scenario_check.py` | 시나리오 expect 자동 검증 + 안전 불변식 검사 |
 | | `tools/camcheck.py` | 카메라 밝기·노이즈·fps 측정, 녹화 |
 | | `tools/mcucheck.py` | ESP32 펌웨어 자동 점검 7항목 |
+| | `tools/bench.py` | 검출기 추론 속도 측정 (모델·스레드별) |
 
 ### 1.3 안전 설계 원칙 (코드에 반영됨)
 - **비대칭 판단**: 사람이 1프레임만 보여도 즉시 N. Y는 3초 + 10프레임 연속으로 비어 있어야 함
@@ -96,14 +97,16 @@ Source ──▶ HealthMonitor ──▶ Detector ──▶ SafetyFSM ──▶ 
 
 ### 4.1 바로 다음
 1. ~~EXP-006: ESP32 실기 검증~~ → 완료 (mcucheck 7/7, 파이프라인 연결). 남은 육안 확인 3건은 EXPERIMENTS EXP-006
-2. RPi 기본 세팅: OS, Python 3.11, venv, 패키지 → RPi에서 `pytest`와 가상 입력 실행
-3. RPi ↔ ESP32 USB 시리얼 연결, 워치독 검증 (프로세스 강제 종료, 케이블 분리)
+2. ~~RPi 기본 세팅~~ → 완료 (EXP-007): Python 3.13 venv, 테스트 100개·실시간 9개·시나리오 9개 통과
+3. ~~RPi 추론 속도~~ → 완료 (EXP-005): 320·3스레드·15 fps로 결정, 640은 현재 설정으로 사용 불가
+4. RPi ↔ ESP32 실기 연결은 생략, Mock(가상 시리얼 + 가짜 ESP32)으로 검증 완료 (EXP-007)
+5. RPi 방열판·팬 준비 (E-09), RPi용 설정 파일(`config/rpi_*.yaml`)은 카메라 확정 후 작성
 
 ### 4.2 그 다음 (카메라 확정 후, 수업 외 시간)
 4. 카메라 Source (기종 미정: CSI / USB / 열화상 후보. 열화상이면 `FramePacket.image` 계약과 Detector 재검토)
 5. EXP-002: 렌즈 가림 측정 → `low_contrast` 검사 추가 + `camera_covered` 시나리오 (E-01)
 6. EXP-003: 화면 정지 임계값 재확인 (E-02)
-7. EXP-004 / EXP-005: 새 카메라 기준 health 임계값, RPi 추론 속도
+7. EXP-004: 새 카메라 기준 health 임계값, E-08 재확인
 8. 640 모델 비교, 녹화 클립 + expect 자동 검증
 
 ### 4.3 미결 사항 (DESIGN §15)

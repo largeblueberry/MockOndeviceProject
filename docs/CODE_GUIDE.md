@@ -144,7 +144,8 @@ src/psafe/
 │
 └── tools/
     ├── camcheck.py      카메라 측정 도구 (파이프라인과 독립)
-    └── mcucheck.py      ESP32 펌웨어 점검 도구 (파이프라인과 독립)
+    ├── mcucheck.py      ESP32 펌웨어 점검 도구 (파이프라인과 독립)
+    └── bench.py         검출기 추론 속도 측정
 
 firmware/esp32/psafe_gate/psafe_gate.ino   ESP32 펌웨어 (Arduino)
 ```

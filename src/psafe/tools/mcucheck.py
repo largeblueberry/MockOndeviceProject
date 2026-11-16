@@ -96,7 +96,8 @@ def run(port: str) -> int:
 
     ser = serial.Serial(port, 115200, timeout=0.05)
     log, stop = Log(), threading.Event()
-    threading.Thread(target=reader, args=(ser, log, stop), daemon=True).start()
+    rd = threading.Thread(target=reader, args=(ser, log, stop), daemon=True)
+    rd.start()
     tx = Sender(ser)
     results: list[tuple[str, bool, str]] = []
 
@@ -172,6 +173,7 @@ def run(port: str) -> int:
     tx.stream(0.4, n)            # 끝은 N으로
     time.sleep(1.1)              # 마지막 STAT 줄 받기
     stop.set()
+    rd.join(1.0)                 # 수신 스레드가 read()를 끝낸 뒤에 포트를 닫는다
     ser.close()
 
     passed = sum(ok for _, ok, _ in results)
