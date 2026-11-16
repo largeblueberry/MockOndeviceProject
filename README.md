@@ -11,7 +11,7 @@
 
 | 문서 | 내용 | 대상 |
 |---|---|---|
-| [`docs/RESEARCH.md`](docs/RESEARCH.md) | 문제의 근거(사고 통계·사례·해외 기준), 기존 방법과 비교, 아이디어 확장 방향 | 주제 배경을 파악할 때 |
+| [`docs/RESEARCH.md`](docs/RESEARCH.md) | 문제의 근거(사고 통계·사례·제도), 기존 방법과 비교, 아이디어 확장 방향 | 주제 배경을 파악할 때 |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | 설계 원칙, 아키텍처, 데이터 계약, FSM, HW 구성, 통신 프로토콜, 기술 스택 | 설계 의도를 확인할 때 |
 | [`docs/CODE_GUIDE.md`](docs/CODE_GUIDE.md) | 파일 간 연결 관계, 실행 흐름, 주요 설계 패턴, 권장 읽기 순서 | 코드 구조를 처음 볼 때 |
 | [`docs/PROGRESS.md`](docs/PROGRESS.md) | 구현 현황, 실험 결과, 다음 작업 | 현재 진행 상황을 확인할 때 |
