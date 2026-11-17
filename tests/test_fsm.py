@@ -119,3 +119,27 @@ def test_no_frame_and_external_fault():
     assert drv.fsm.on_no_frame(5.0).reason == "no_frame"
     d = drv.fsm.fault("detector_error", 5.1)
     assert (d.safe, d.seq) == (False, -1)
+
+
+# ---- 외부 리뷰(2026-11-17)에서 찾은 경우 --------------------------------------
+
+def test_frame_gap_forces_reverification():
+    # CLEAR(Y) 상태에서 worker가 2초 밀렸다가 최신 프레임 1장을 받았다.
+    # 수정 전: 그 1장으로 바로 Y. 수정 후: FAULT -> 복구 -> 처음부터 재검증.
+    drv = Driver()
+    assert drv.frames(15)[-1].safe
+    drv.seq += 20                                   # 2초 동안 처리된 프레임 없음
+    d = drv.frame()
+    assert (d.safe, d.state, d.reason) == (False, State.FAULT, "frame_gap")
+    ds = drv.frames(15)
+    # 복구 2장 (3번째가 검증 시작) + 비어 있음 1.0초 동안은 N
+    assert [x.safe for x in ds].index(True) == 2 + 10
+
+
+def test_small_frame_gap_is_not_fault():
+    # 프레임 몇 장을 건너뛴 정도(0.4초 < 0.5초)는 정상 운용이다 (RPi 처리 간격 ~150 ms).
+    drv = Driver()
+    drv.frames(15)
+    drv.seq += 3
+    d = drv.frame()
+    assert (d.safe, d.state) == (True, State.CLEAR)

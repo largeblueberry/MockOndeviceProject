@@ -6,3 +6,6 @@ __pycache__/
 *.pt
 recordings/
 .pio/
+
+# 외부 리뷰 메모 (로컬 전용)
+REVIEW_*.md

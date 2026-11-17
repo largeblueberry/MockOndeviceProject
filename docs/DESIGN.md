@@ -65,7 +65,7 @@
 
 **ThreadedRunner 구현 규칙** (`runners.py`)
 - **FSM은 Worker 스레드만 소유** → FSM에 락 불필요. Heartbeat는 `DecisionBoard`(락 1개)로 최신 Decision만 읽는다.
-- **Heartbeat가 Decision 나이를 직접 검사**: Worker가 `predict()` 안에서 멈추면 `on_no_frame()`조차 못 부른다. 이걸 잡는 건 Heartbeat뿐 → `decision_stale` N.
+- **Heartbeat가 Decision 나이를 직접 검사**: Worker가 `predict()` 안에서 멈추면 `on_no_frame()`조차 못 부른다. 이걸 잡는 건 Heartbeat뿐 → `decision_stale` N. 판단 시각(`decided_at`)과 함께 **Y의 근거 프레임 촬영 시각(`timestamp`)도 본다.** Y는 근거 영상보다 `max_decision_age_ms` 넘게 살아남지 않는다 (`expire_decision`, E-10).
 - **열기 순서: Output → Detector(load·warmup) → Source(카메라 마지막)**. 모델 로딩 동안 쌓인 프레임이 첫 판단부터 stale이 되지 않게.
 - **어떤 스레드든 죽으면 run 종료** (`result.error`). 종료 시 **마지막 송신은 항상 N(`shutdown`)**. 재시작은 systemd, 그 사이 공백은 ESP32 워치독이 커버.
 - Output 하나의 예외가 다른 Output을 막지 않는다 (각각 try/except).
@@ -347,9 +347,10 @@ RPi → ESP32, **주기 200ms** (Decision이 바뀌지 않아도 계속 송신 =
 |---|---|---|
 | `stale_frame` | FSM | `now - 촬영시각 > max_frame_age_ms` |
 | `out_of_order` | FSM | seq/timestamp가 역행 |
+| `frame_gap` | FSM | 직전 처리 프레임과 촬영 간격 > `max_frame_age_ms`. 그 사이 구역을 아무도 보지 않았으므로 재검증 (E-11) |
 | `no_frame` | Runner | 프레임 대기 타임아웃 |
 | `detector_error` | Runner | `predict()` 예외 — 루프는 죽지 않고 N |
-| `too_dark` / `too_bright` | HealthMonitor | 렌즈 가림, 과노출 |
+| `too_dark` / `too_bright` | HealthMonitor | 렌즈 가림, 과노출. 카메라 이상이면 **추론을 건너뛰고** 바로 N (E-12) |
 | `frozen_frame` | HealthMonitor | 연속 프레임 픽셀 차이 ≈ 0 (`freeze_frames` 회 연속) |
 | `recovering` | FSM | Fault 후 정상 프레임 `fault_recover_frames` 개 대기 중 |
 
@@ -400,7 +401,7 @@ runner:
   mode: sync                # sync | threaded
   clock: auto               # auto(sync→fake, threaded→real) | real | fake
   heartbeat_ms: 200
-  max_decision_age_ms: 600  # heartbeat가 보낼 판단이 이보다 오래되면 N
+  max_decision_age_ms: 600  # heartbeat가 보낼 판단(또는 Y의 근거 프레임)이 이보다 오래되면 N
   metrics_interval_s: 5
 ```
 

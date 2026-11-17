@@ -51,7 +51,7 @@ Source ──▶ HealthMonitor ──▶ Detector ──▶ SafetyFSM ──▶ 
 - **스레드가 죽으면** 전체 종료 + 마지막 송신은 항상 N
 
 ### 1.4 검증
-- 단위·통합 테스트 98개 통과 (프로토콜·MockMCU·시리얼 출력 12개 포함) (`.venv\Scripts\python -m pytest -q`)
+- 단위·통합 테스트 107개 통과 (2026-11-17 기준, 외부 리뷰 반영분 7개 포함) (프로토콜·MockMCU·시리얼 출력 12개 포함) (`.venv\Scripts\python -m pytest -q`)
 - 실시간 스레드 테스트 9개 (`pytest -m slow`)
 - 가상 시나리오 9개 sync / threaded 둘 다 통과:
   entry_normal, exit_normal, reenter, flicker, roi_boundary, stale_frames, camera_outage, camera_blackout, camera_freeze

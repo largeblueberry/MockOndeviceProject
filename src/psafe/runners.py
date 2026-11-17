@@ -27,12 +27,32 @@ def process_frame(c: Components, pkt: FramePacket) -> tuple[Decision, FrameDetec
     예외는 FAULT 판단으로 바뀐다.
     """
     fault = c.health.check(pkt)
+    if fault:
+        # 카메라가 이상하면 모델 결과와 상관없이 N이다. 추론(RPi 100~250 ms)을 기다리지
+        # 않고 바로 N을 낸다. 빈 검출 결과로 step()을 거쳐 FSM의 프레임 순서·간격
+        # 기록은 계속 이어지게 한다.
+        empty = FrameDetections(pkt.seq, pkt.timestamp, (), "skipped", 0.0)
+        return c.fsm.step(empty, c.clock.now(), fault), None
     try:
         dets = c.detector.predict(pkt)
     except Exception:
         log.exception("detector failed on seq %d", pkt.seq)
         return c.fsm.fault("detector_error", c.clock.now()), None
     return c.fsm.step(dets, c.clock.now(), fault), dets
+
+
+def expire_decision(d: Decision, now: float, max_age_s: float) -> Decision | None:
+    """하트비트가 보내려는 판단이 만료됐으면 N 판단을, 아니면 None을 반환한다.
+
+    두 가지 나이를 본다.
+      * 판단을 만든 시각 (decided_at): worker가 멈췄는지
+      * Y의 근거 프레임을 찍은 시각 (timestamp): Y는 근거 영상보다 오래 살아남으면
+        안 된다. 판단 시각만 보면 촬영 후 490 ms에 만든 Y가 600 ms 더 나가서,
+        근거 영상 기준 약 1.1초 동안 Y가 유지될 수 있었다.
+    """
+    if now - d.decided_at > max_age_s or (d.safe and now - d.timestamp > max_age_s):
+        return unsafe(State.FAULT, "decision_stale", now)
+    return None
 
 
 def notify_frame(c: Components, pkt: FramePacket, dets: FrameDetections | None, decision: Decision) -> None:
@@ -176,7 +196,8 @@ class ThreadedRunner:
     T2 worker     frame_slot.get(timeout) -> process_frame -> board   (FSM을 단독 소유, 락 불필요)
                   시간 초과 -> fsm.on_no_frame()
     T3 heartbeat  heartbeat_ms마다 board.latest() -> outputs
-                  판단이 max_decision_age_ms보다 오래되면 -> N  (멈춘 worker를 잡아냄)
+                  판단 또는 Y의 근거 프레임이 max_decision_age_ms보다 오래되면 -> N
+                  (멈춘 worker를 잡아냄, expire_decision 참고)
     main          감독: 지표 기록, 스레드 생존 확인, Ctrl+C, 스트림 종료
 
     어떤 스레드든 죽으면 result.error를 설정하고 실행을 멈춘다. Output에 마지막으로
@@ -333,8 +354,8 @@ class ThreadedRunner:
             d = self.board.latest()
             if d is None:
                 d = unsafe(State.INIT, "no_decision_yet", now)
-            elif now - d.decided_at > self.max_decision_age_s:
-                d = unsafe(State.FAULT, "decision_stale", now)
+            elif (stale := expire_decision(d, now, self.max_decision_age_s)) is not None:
+                d = stale
                 r.stale_heartbeats += 1
             self._send_all(d)
             r.heartbeats += 1

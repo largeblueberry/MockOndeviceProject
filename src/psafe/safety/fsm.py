@@ -9,8 +9,8 @@
   * ROI 안에 사람이 있는 프레임이 1장이라도 나오면 즉시 N.
   * Y는 "사람 없음"이 clear_time_s 동안, 그리고 clear_min_frames장 연속될 때만.
     둘 다 보는 이유: FPS가 낮으면 시간 조건만으로는 2~3장만 보고 통과할 수 있다.
-  * 입력이 조금이라도 의심스러우면 (오래된 프레임, 카메라 이상, 프레임 없음,
-    검출기 오류) FAULT (N). FAULT를 벗어날 때는 항상 VERIFYING을 거치며,
+  * 입력이 조금이라도 의심스러우면 (오래된 프레임, 프레임 사이 공백, 카메라 이상,
+    프레임 없음, 검출기 오류) FAULT (N). FAULT를 벗어날 때는 항상 VERIFYING을 거치며,
     CLEAR로 바로 가지 않는다.
   * 비어 있는 시간은 프레임 촬영 시각으로 잰다. "CPU가 쓴 시간"이 아니라
     "카메라가 빈 구역을 본 시간"이다.
@@ -90,6 +90,11 @@ class SafetyFSM:
             return "out_of_order"
         if now - dets.timestamp > self.max_age_s + TIME_EPS:
             return "stale_frame"
+        # 직전 처리 프레임과 촬영 간격이 너무 벌어졌다 (worker가 밀렸다가 최신 프레임을
+        # 받음). 그 사이에는 아무도 구역을 보지 않았으므로 연속 관찰이 끊긴 것이다.
+        # FAULT로 보내 비어 있음 확인을 처음부터 다시 하게 한다.
+        if self._last_ts != float("-inf") and dets.timestamp - self._last_ts > self.max_age_s + TIME_EPS:
+            return "frame_gap"
         return None
 
     def _person_in_roi(self, dets: FrameDetections) -> bool:

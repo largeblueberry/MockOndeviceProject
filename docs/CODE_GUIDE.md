@@ -484,9 +484,9 @@ flowchart TD
 | `VERIFYING` | `verifying` | 비어 있음 확인 중 (`clear_time_s`, `clear_min_frames` 미충족) |
 | `CLEAR` | `clear` | 비어 있음 확인 완료 |
 | `FAULT` | `empty_frame`, `too_dark`, `too_bright`, `frozen_frame` | 카메라 이상 (HealthMonitor) |
-| `FAULT` | `stale_frame`, `out_of_order`, `no_frame` | 입력 시간 이상 (SafetyFSM, Runner) |
+| `FAULT` | `stale_frame`, `out_of_order`, `frame_gap`, `no_frame` | 입력 시간 이상 (SafetyFSM, Runner) |
 | `FAULT` | `detector_error` | 검출기 예외 (Runner) |
-| `FAULT` | `decision_stale` | worker 멈춤으로 판단이 오래됨 (heartbeat) |
+| `FAULT` | `decision_stale` | worker 멈춤으로 판단 또는 Y의 근거 프레임이 오래됨 (heartbeat) |
 | `FAULT` | `recovering` | 이상 해소 후 정상 프레임 누적 중. **상태는 아직 FAULT**이며, `fault_recover_frames`장이 쌓이면 VERIFYING으로 넘어간다 |
 | `FAULT` | `shutdown` | 프로그램 종료 시 마지막 송신 |
 
