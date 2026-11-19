@@ -76,6 +76,31 @@ class AppConfig:
     link: LinkConfig | None = None
 
 
+@dataclass
+class HubNodeConfig:
+    name: str                          # "A" / "B"
+    address: str                       # 그 노드가 Control을 받는 주소 "호스트:포트"
+
+
+@dataclass
+class HubConfig:
+    """C (허브) 설정 (DESIGN.md §7.4). 카메라·모델이 없다."""
+    nodes: list[HubNodeConfig]
+    bind: str = "0.0.0.0:5005"         # C가 Report를 받는 주소
+    node: str = "C"                    # C 자신의 이름 (Control의 node 필드)
+    heartbeat_ms: float = 200.0
+    node_timeout_ms: float = 500.0
+    max_evidence_age_ms: float = 1000.0
+    confirm_timeout_s: float = 3.0
+    metrics_interval_s: float = 5.0
+
+
+@dataclass
+class HubAppConfig:
+    hub: HubConfig
+    outputs: list[ComponentConfig] = field(default_factory=lambda: [ComponentConfig("console")])
+
+
 class ConfigError(ValueError):
     pass
 
@@ -146,6 +171,39 @@ def _check_link(link: LinkConfig) -> None:
         raise ConfigError("config.link.confirm_frames: must be an int >= 1")
 
 
-def load_config(path: str | Path) -> AppConfig:
+def parse_hub_config(data: dict[str, Any]) -> HubAppConfig:
+    cfg = _build(HubAppConfig, data, "config")
+    h = cfg.hub
+    names = [n.name for n in h.nodes]
+    if not names or len(set(names)) != len(names):
+        raise ConfigError(f"config.hub.nodes: need at least one node with unique names, got {names}")
+    for n in [*names, h.node]:
+        if not isinstance(n, str) or not 1 <= len(n) <= 64 or not n.isascii() or not n.isprintable():
+            raise ConfigError(f"config.hub: node name must be 1..64 printable ASCII chars, got {n!r}")
+    if h.node in names:
+        raise ConfigError("config.hub.node: must differ from the node names")
+    parse_address(h.bind)
+    for n in h.nodes:
+        parse_address(n.address)
+    for k in ("heartbeat_ms", "node_timeout_ms", "max_evidence_age_ms", "confirm_timeout_s"):
+        if getattr(h, k) <= 0:
+            raise ConfigError(f"config.hub.{k}: must be > 0")
+    return cfg
+
+
+def read_yaml(path: str | Path) -> dict[str, Any]:
     with open(path, encoding="utf-8") as f:
-        return parse_config(yaml.safe_load(f) or {})
+        return yaml.safe_load(f) or {}
+
+
+def is_hub_config(data: dict[str, Any]) -> bool:
+    """설정 파일에 `hub:` 절이 있으면 C(허브)로 실행한다."""
+    return isinstance(data, dict) and "hub" in data
+
+
+def load_config(path: str | Path) -> AppConfig:
+    return parse_config(read_yaml(path))
+
+
+def load_hub_config(path: str | Path) -> HubAppConfig:
+    return parse_hub_config(read_yaml(path))

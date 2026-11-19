@@ -3,6 +3,10 @@ python -m psafe --mode threaded                          (실시간, 3스레드.
 python -m psafe --scenario scenarios/flicker.yaml --check
 python -m psafe --scenario "scenarios/*.yaml" --check    (전체 시나리오, 즉시 실행)
 python -m psafe --scenario "scenarios/*.yaml" --check --mode threaded   (전체 시나리오, 실시간)
+
+보드 여러 대 (DESIGN.md §7.4). 설정 파일에 `hub:` 절이 있으면 C(허브)로 실행한다.
+python -m psafe --config config/hub_c.yaml       (C: A·B의 보고를 모아 판정)
+python -m psafe --config config/node_a.yaml      (A: 카메라 노드, C에 보고)
 """
 
 import argparse
@@ -11,7 +15,7 @@ import logging
 import sys
 
 from psafe.app import build
-from psafe.core.config import ConfigError, load_config
+from psafe.core.config import ConfigError, is_hub_config, parse_config, parse_hub_config, read_yaml
 from psafe.runners import SyncRunner, ThreadedRunner
 from psafe.scenario_check import run_scenario
 
@@ -31,13 +35,16 @@ def main(argv: list[str] | None = None) -> int:
     level = logging.DEBUG if args.verbose else logging.WARNING if args.quiet else logging.INFO
     logging.basicConfig(
         level=level,
-        format="%(asctime)s %(levelname)-5s %(threadName)-9s %(name)s | %(message)s",
+        format="%(asctime)s.%(msecs)03d %(levelname)-5s %(threadName)-9s %(name)s | %(message)s",
         datefmt="%H:%M:%S",
     )
     try:
         if args.scenario:
             return _run_scenarios(args)
-        cfg = load_config(args.config)
+        data = read_yaml(args.config)
+        if is_hub_config(data):
+            return _run_hub(parse_hub_config(data), args)
+        cfg = parse_config(data)
         if args.mode:
             cfg.runner.mode = args.mode
             if cfg.runner.clock == "fake" and args.mode == "threaded":
@@ -53,6 +60,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         result = ThreadedRunner(c, max_seconds=args.seconds).run()
     except (FileNotFoundError, RuntimeError) as e:  # 모델 / 카메라 / 영상 열기 실패
+        logging.error("startup failed: %s", e)
+        return 2
+    return 1 if result.error else 0
+
+
+def _run_hub(cfg, args: argparse.Namespace) -> int:
+    from psafe.hub import HubRunner, build_hub
+    try:
+        hub = build_hub(cfg)
+        result = HubRunner(hub, max_seconds=args.seconds).run()
+    except OSError as e:          # 포트 사용 중 등
         logging.error("startup failed: %s", e)
         return 2
     return 1 if result.error else 0

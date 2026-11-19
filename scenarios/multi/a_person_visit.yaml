@@ -1,0 +1,6 @@
+description: "다중 보드 시연 A: 비어 있다가 사람이 잠깐 들어왔다 나감"
+fps: 15
+timeline:
+  - { from: 0.0,  to: 15.0, objects: [] }
+  - { from: 15.0, to: 20.0, objects: [person] }
+  - { from: 20.0, to: 60.0, objects: [] }

@@ -400,11 +400,13 @@ RPi → ESP32, **주기 200ms** (Decision이 바뀌지 않아도 계속 송신 =
 
 | `kind` | 조건 (위에서부터 우선) | 프로토콜 v1 매핑 (→ ESP32) |
 |---|---|---|
-| `UNKNOWN` | 어느 노드든 무응답, `FAULT`, 근거가 오래됨, 버전 불일치, 확인 시간 초과, C 부팅 직후 | `FAULT` / N |
-| `OCCUPIED` | 어느 노드든 `count > 0` 또는 `confirm == "occupied"` | `OCCUPIED` / N |
-| `CHECKING` | 둘 다 사람 0명, CONFIRM 진행 중 | `VERIFYING` / N |
+| `OCCUPIED` | 어느 노드든 `count > 0`, `state == OCCUPIED`, 또는 현재 확인에 `"occupied"`로 답함 | `OCCUPIED` / N |
+| `UNKNOWN` | 어느 노드든 무응답, `FAULT`, `INIT`, 근거가 오래됨(`CLEAR`인데 C 기준 근거 나이 > 1000 ms), 확인 실패(`"fault"`)·시간 초과, C 부팅 직후 | `FAULT` / N |
+| `CHECKING` | 사람은 없지만 어느 노드가 아직 `CLEAR`가 아님(자기 FSM 확인 중), 또는 CONFIRM 진행 중 | `VERIFYING` / N |
 | `EMPTY` | 7.4.5의 3번 조건 충족 | `CLEAR` / **Y** |
 
+- **`OCCUPIED`가 `UNKNOWN`보다 위인 이유 (2026-11-19 변경):** 둘 다 N이라 안전성은 같다. 하지만 B가 무응답일 때 A가 본 사람을 "판단 불가"로 덮으면, 관리자가 가장 확실하고 바로 행동할 수 있는 정보를 잃는다. 노드별 상태는 `Verdict.nodes`로 항상 함께 나가므로 B 무응답도 화면에 보인다.
+- `OCCUPIED`·`UNKNOWN`·`CHECKING`(노드 미준비) 중 하나라도 되면 현재 `confirm_id`를 버린다. 다시 `EMPTY`가 되려면 새 번호로 확인해야 한다.
 - **판단 기준은 "합계 == 0"이다.** A·B가 겹쳐 보는 구역에서 같은 사람이 두 번 세어져도 0이 아니게 되므로 안전 쪽 오류다. 진짜 위험은 겹침이 아니라 **두 카메라 모두의 사각지대**다 (현장 사각지대 시험 필요).
 - 같은 사람이 두 번 세어질 수 있으므로 **화면에는 합계가 아니라 노드별 인원**을 보여 준다.
 - 사람 감지는 즉시 반영하고, `EMPTY`는 확인을 거친 뒤에만 낸다 (비대칭 판단, 원칙 3).
@@ -421,6 +423,8 @@ RPi → ESP32, **주기 200ms** (Decision이 바뀌지 않아도 계속 송신 =
 - **A·B:** 새 Output `udp_report` 하나를 추가한다. `send()`가 이미 하트비트(200 ms)마다 호출되므로 구조가 그대로 맞는다. 다만 `control` 수신(`confirm_id`)을 FSM 쪽으로 전달할 경로가 필요하다. 지금 Output은 송신만 하므로 이 부분은 새로 설계한다.
 - **계약 변경:** `Decision`에 `count: int`(ROI 안 사람 수)를 추가한다. 4.3과 `core/packets.py`를 함께 고친다.
 - **C:** 카메라 파이프라인이 아니라 `UdpReceiver → Aggregator → VerdictOutput들(7.5)` 구조다. 하트비트 스레드가 200 ms마다 최신 `Verdict`를 모든 출력에 전달한다.
+- **구현됨 (2026-11-19, C 판정):** `core/verdict.py`(`Verdict`, `NodeView`, `VerdictKind`), `safety/aggregator.py`(`Aggregator`, `to_protocol`), `outputs/verdict_api.py`(`VerdictOutput` 인터페이스, `VERDICT_OUTPUTS` 레지스트리, `console`, 기존 Output을 감싸는 `decision` 브리지). 테스트 `tests/test_aggregator.py`. 
+- **구현됨 (2026-11-19, C 실행):** `hub.py`(`Hub`, `HubRunner`: 수신 스레드 + 하트비트[판정 → 출력 → Control 송신] + 감독). 설정 파일에 `hub:` 절이 있으면 `python -m psafe --config config/hub_c.yaml`이 C로 실행된다. PC 한 대 시험용 설정 `config/hub_c.yaml`, `config/node_a.yaml`, `config/node_b.yaml`(127.0.0.1). 실측은 EXPERIMENTS EXP-009.
 
 ### 7.5 C의 출력 — 디스플레이 추상화 + LED
 
@@ -459,7 +463,7 @@ VerdictOutput
 4. **살아 있음 표시:** 매 `show()`마다 바뀌는 요소(시계, 깜빡이는 점)와 "마지막 갱신 N초 전"을 넣는다. C가 멈추면 관리자가 화면이 멈춘 것을 알 수 있어야 한다.
 5. 구현체가 C와 **다른 프로세스나 장치**(브라우저, 별도 MCU의 LCD 등)라면, `show()`가 1초 넘게 오지 않을 때 스스로 화면 전체를 `UNKNOWN(display_stale)`으로 바꾼다.
 
-먼저 만들 구현체: `console`(텍스트), `mock`(테스트용 기록). 실제 디스플레이는 기종이 정해지면 구현체를 하나 추가한다.
+구현체: `console`(텍스트), `decision`(기존 Output을 감싼다. ESP32 LED는 `{name: decision, options: {output: serial, options: {port: ...}}}`). 실제 디스플레이는 기종이 정해지면 `VERDICT_OUTPUTS`에 구현체를 하나 추가한다.
 
 ---
 

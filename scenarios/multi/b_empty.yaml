@@ -1,0 +1,4 @@
+description: "다중 보드 시연 B: 계속 비어 있음"
+fps: 15
+timeline:
+  - { from: 0.0, to: 60.0, objects: [] }

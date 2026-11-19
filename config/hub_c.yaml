@@ -1,0 +1,20 @@
+# 다중 보드: 허브 C (DESIGN.md §7.4, §7.5). 카메라·모델 없음.
+# PC 한 대에서 시험할 때는 127.0.0.1을 쓴다. 실기: bind를 "0.0.0.0:5005", 노드 주소를 각 파이 IP로.
+
+hub:
+  node: C
+  bind: 127.0.0.1:5005
+  nodes:
+    - { name: A, address: 127.0.0.1:5006 }
+    - { name: B, address: 127.0.0.1:5007 }
+  heartbeat_ms: 200
+  node_timeout_ms: 500
+  max_evidence_age_ms: 1000
+  confirm_timeout_s: 3.0
+  metrics_interval_s: 5
+
+outputs:
+  - name: console                 # 디스플레이 자리 (기종 미정)
+    options: {}
+  - name: decision                # LED 자리: 기존 ESP32 Output을 감싼다. 실기는 output: serial
+    options: { output: mock_mcu }

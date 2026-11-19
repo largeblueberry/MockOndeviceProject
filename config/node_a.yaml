@@ -1,0 +1,38 @@
+# 다중 보드: 카메라 노드 A (DESIGN.md §7.4). PC 한 대에서 시험할 때는 127.0.0.1을 쓴다.
+# 실기: hub를 C의 IP로, bind를 "0.0.0.0:5006"로 바꾼다.
+
+source:
+  name: dummy
+  options:
+    scenario: scenarios/multi/a_person_visit.yaml
+    width: 320
+    height: 240
+
+model:
+  name: dummy
+  options: {}
+
+outputs:
+  - name: console
+    options: {}
+
+fsm:
+  person_conf_low: 0.30
+  clear_time_s: 3.0
+  clear_min_frames: 10
+  max_frame_age_ms: 500
+  fault_recover_frames: 5
+  roi: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]
+
+runner:
+  mode: threaded
+  heartbeat_ms: 200
+  max_decision_age_ms: 600
+  metrics_interval_s: 10
+
+link:
+  node: A
+  hub: 127.0.0.1:5005
+  bind: 127.0.0.1:5006
+  node_timeout_ms: 500
+  confirm_frames: 10
