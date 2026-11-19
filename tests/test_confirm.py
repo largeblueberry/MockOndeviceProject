@@ -122,7 +122,7 @@ def test_node_link_rejects_garbage_and_wrong_type():
     hub.send(encode(Control("Z", "zb", 1, 9)), NODE)                   # C가 아닌 노드
     while link.poll(0):
         pass
-    assert link.counts["bad_json"] == 1 and link.counts["wrong_type"] == 1
+    assert link.counts["bad_crc"] == 1 and link.counts["wrong_type"] == 1
     assert link.request(0.0) is None
 
 

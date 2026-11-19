@@ -5,11 +5,12 @@ import pytest
 from psafe.core.clock import FakeClock
 from psafe.core.packets import State
 from psafe.core.verdict import VerdictKind as K
+from psafe.core.verdict import to_protocol
 from psafe.link.messages import Report
 from psafe.link.peer import Received
 from psafe.outputs.mock_mcu import MockMcuOutput
 from psafe.outputs.verdict_api import ConsoleVerdictOutput, DecisionBridge, format_verdict, verdict_decision
-from psafe.safety.aggregator import Aggregator, to_protocol
+from psafe.safety.aggregator import Aggregator
 
 FIRST = 1000
 
@@ -19,8 +20,8 @@ def rep(node, state=State.CLEAR, count=0, age=100, cid=None, confirm=None, reaso
     return Report(node, "b" + node, seq, state, safe, count, reason, age, cid, confirm)
 
 
-def at(r: Report, received_at: float) -> Received[Report]:
-    return Received(r, received_at)
+def at(r: Report, received_at: float, transit_s: float | None = 0.0) -> Received[Report]:
+    return Received(r, received_at, transit_s)
 
 
 def agg(**kw) -> Aggregator:
@@ -106,6 +107,22 @@ def test_evidence_age_uses_c_receive_time():
     # A는 보낼 때 근거가 700 ms 전이라고 했고, C는 그 보고를 0.35초 전에 받았다 -> 1050 ms
     v = g.step({"A": at(rep("A", age=700), 0.0), "B": at(rep("B"), 0.35)}, 0.35)
     assert v.nodes[0].evidence_age_ms == pytest.approx(1050)
+    assert (v.kind, v.reason) == (K.UNKNOWN, "A_stale")
+
+
+def test_unknown_transit_blocks_empty():
+    """왕복 시간을 모르면 근거 나이도 모른다 -> CLEAR여도 EMPTY 불가 (E-21)."""
+    g = agg()
+    v = g.step({"A": at(rep("A"), 0.0, transit_s=None), "B": at(rep("B"), 0.0)}, 0.0)
+    assert (v.kind, v.reason) == (K.UNKNOWN, "A_no_rtt")
+    assert v.nodes[0].evidence_age_ms is None and v.nodes[0].transit_ms is None
+
+
+def test_transit_is_added_to_evidence_age():
+    """A가 잰 근거 나이 100 ms + 전달 시간 상한 950 ms -> 1050 ms > 1000 -> 오래됨 (E-21)."""
+    g = agg()
+    v = g.step({"A": at(rep("A", age=100), 0.0, transit_s=0.95), "B": at(rep("B"), 0.0)}, 0.0)
+    assert v.nodes[0].evidence_age_ms == pytest.approx(1050) and v.nodes[0].transit_ms == pytest.approx(950)
     assert (v.kind, v.reason) == (K.UNKNOWN, "A_stale")
 
 

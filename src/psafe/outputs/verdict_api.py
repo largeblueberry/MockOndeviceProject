@@ -22,9 +22,8 @@ from typing import Any
 from psafe.core.clock import Clock
 from psafe.core.packets import Decision, State
 from psafe.core.registry import Registry
-from psafe.core.verdict import Verdict, VerdictKind
+from psafe.core.verdict import Verdict, VerdictKind, to_protocol
 from psafe.outputs.output_api import OUTPUTS, Output
-from psafe.safety.aggregator import to_protocol
 
 log = logging.getLogger("psafe.output.verdict")
 

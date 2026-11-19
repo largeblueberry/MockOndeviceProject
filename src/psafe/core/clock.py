@@ -47,3 +47,18 @@ class FakeClock(Clock):
     def sleep(self, seconds: float) -> None:
         if seconds > 0:
             self.advance(seconds)
+
+
+class OffsetClock(Clock):
+    """다른 시계에 고정 오프셋을 더한 시계. 시뮬레이션에서 '파이마다 다른 시계'를
+    흉내 낸다 (DESIGN.md §7.4.3). 흐르는 속도는 기준 시계와 같고, 읽는 값만 다르다."""
+
+    def __init__(self, base: Clock, offset: float):
+        self.base = base
+        self.offset = offset
+
+    def now(self) -> float:
+        return self.base.now() + self.offset
+
+    def sleep(self, seconds: float) -> None:
+        self.base.sleep(seconds)

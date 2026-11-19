@@ -97,11 +97,18 @@ class NodeLink:
         evidence_age_ms = None if d.seq < 0 else max(0, round((now - d.timestamp) * 1000))
         if confirm.confirm_id is None:
             confirm = NO_CONFIRM
+        # 왕복 시간용 echo (E-21): 마지막으로 받은 Control과, 받은 뒤 지난 시간 (이 노드 시계의 길이)
+        with self._lock:
+            last = self._tracker.latest(self.hub_node, now)
+        echo_seq = echo_hold_ms = None
+        if last is not None:
+            echo_seq, echo_hold_ms = last.msg.seq, max(0, round((now - last.received_at) * 1000))
         rep = Report(
             node=self.node, boot=self.boot, seq=self._seq,
             state=d.state, safe=d.safe, count=d.count, reason=d.reason[:64] or "-",
             evidence_age_ms=evidence_age_ms,
             confirm_id=confirm.confirm_id, confirm=confirm.result,
+            echo_seq=echo_seq, echo_hold_ms=echo_hold_ms,
         )
         self.transport.send(encode(rep), self.hub)
         self.counts["sent"] += 1

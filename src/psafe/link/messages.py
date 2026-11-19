@@ -6,19 +6,29 @@
 형식: UTF-8 JSON 객체 1개 = UDP 데이터그램 1개. 필드 집합은 정확히 일치해야
 한다 (빠진 필드·모르는 필드 모두 거부). 형식을 바꾸면 PROTOCOL_VERSION을 올린다.
 
+v2 (2026-11-19):
+  * 무결성 (E-20): 마지막 필드가 항상 "crc"이고, 값은 `,"crc":` 앞까지 바이트 전체의 CRC32다.
+    깨진 메시지는 JSON으로 해석하기 전에 거부한다 (`bad_crc`). 깨진 boot·seq가 진짜 노드를
+    '지나간 boot'로 밀어내던 문제를 막는다.
+  * 왕복 시간 (E-21): Report에 echo_seq(마지막으로 받은 Control의 seq)와 echo_hold_ms(그 Control을
+    받은 뒤 이 Report를 보낼 때까지, 노드 시계)를 싣는다. C는 자기 시계만으로 왕복 시간을 계산해
+    근거 나이에 더한다 (hub.py). 시각은 여전히 보드끼리 비교하지 않는다.
+
 규칙 검사는 데이터 클래스 생성 시점(__post_init__)에 한 번만 한다. 그래서
   * 잘못된 메시지는 만들 수조차 없고 (encode 전에 ValueError)
   * decode도 같은 검사를 거친다 (보내는 쪽과 받는 쪽 규칙이 어긋날 수 없다).
 """
 
 import json
+import re
 import secrets
+import zlib
 from dataclasses import dataclass
 from typing import Any
 
 from psafe.core.packets import State
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 MAX_MESSAGE_BYTES = 512          # 실제 Report는 ~250 B. 이보다 크면 해석하지 않는다
 MAX_SEQ = 2**53 - 1              # JSON 숫자가 정밀도를 잃지 않는 범위
 MAX_COUNT = 999
@@ -73,6 +83,8 @@ class Report:
     evidence_age_ms: int | None     # 보낼 때 기준 근거 프레임 나이 (보내는 쪽 시계). 근거 없으면 None
     confirm_id: int | None          # 마지막으로 받은 C의 confirm_id
     confirm: str | None             # None / pending / empty / occupied / fault
+    echo_seq: int | None = None     # 마지막으로 받은 C의 Control seq. 받은 적 없으면(또는 C 무응답) None
+    echo_hold_ms: int | None = None  # 그 Control을 받은 뒤 이 Report를 보낼 때까지 (보내는 쪽 시계, 길이만)
 
     TYPE = "report"
 
@@ -98,6 +110,10 @@ class Report:
             raise ValueError("safe=true with count > 0")
         if self.confirm is not None and self.confirm_id is None:
             raise ValueError("confirm result without confirm_id")
+        _opt_int("echo_seq", self.echo_seq, 0, MAX_SEQ)
+        _opt_int("echo_hold_ms", self.echo_hold_ms, 0, MAX_SEQ)
+        if (self.echo_seq is None) != (self.echo_hold_ms is None):
+            raise ValueError("echo_seq and echo_hold_ms must be given together")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -106,6 +122,7 @@ class Report:
             "state": self.state.value, "safe": self.safe, "count": self.count, "reason": self.reason,
             "evidence_age_ms": self.evidence_age_ms,
             "confirm_id": self.confirm_id, "confirm": self.confirm,
+            "echo_seq": self.echo_seq, "echo_hold_ms": self.echo_hold_ms,
         }
 
     @classmethod
@@ -116,7 +133,7 @@ class Report:
             raise ValueError(f"unknown state {d['state']!r}") from None
         return cls(
             d["node"], d["boot"], d["seq"], state, d["safe"], d["count"], d["reason"],
-            d["evidence_age_ms"], d["confirm_id"], d["confirm"],
+            d["evidence_age_ms"], d["confirm_id"], d["confirm"], d["echo_seq"], d["echo_hold_ms"],
         )
 
 
@@ -153,19 +170,31 @@ _TYPES: dict[str, type[Report] | type[Control]] = {Report.TYPE: Report, Control.
 _FIELDS = {
     Report.TYPE: frozenset(
         ["v", "type", "node", "boot", "seq", "state", "safe", "count", "reason",
-         "evidence_age_ms", "confirm_id", "confirm"]
+         "evidence_age_ms", "confirm_id", "confirm", "echo_seq", "echo_hold_ms"]
     ),
     Control.TYPE: frozenset(["v", "type", "node", "boot", "seq", "confirm_id"]),
 }
+_CRC_KEY = b',"crc":'
+_CRC_TAIL = re.compile(rb"(0|[1-9][0-9]{0,9})\}")
 
 
 # ---- 직렬화 ---------------------------------------------------------------
 
-def encode(msg: Message) -> bytes:
-    data = json.dumps(msg.to_dict(), separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
+def encode_raw(d: dict[str, Any]) -> bytes:
+    """dict -> 데이터그램 (CRC 꼬리 포함). 규칙 검사는 하지 않는다.
+    encode()가 쓰며, 테스트·점검 도구가 '내용은 틀렸지만 CRC는 맞는' 메시지를 만들 때도 쓴다."""
+    if "crc" in d:
+        raise ValueError("crc is added by encode_raw")
+    body = json.dumps(d, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
+    head = body[:-1]                                   # 닫는 } 를 떼고 crc를 마지막 필드로 붙인다
+    data = head + _CRC_KEY + str(zlib.crc32(head)).encode("ascii") + b"}"
     if len(data) > MAX_MESSAGE_BYTES:
         raise ValueError(f"message too large: {len(data)} B")
     return data
+
+
+def encode(msg: Message) -> bytes:
+    return encode_raw(msg.to_dict())
 
 
 def _reject_constant(name: str) -> Any:
@@ -174,16 +203,21 @@ def _reject_constant(name: str) -> Any:
 
 def decode(data: bytes) -> Message | str:
     """해석한다. 유효하면 Report/Control, 아니면 무시 사유 문자열:
-    too_large | bad_json | bad_version | bad_type | bad_fields | invalid
+    too_large | bad_crc | bad_json | bad_version | bad_type | bad_fields | invalid
     (parse_window()와 같은 방식: 예외를 던지지 않는다. 받는 쪽은 사유별로 세기만 한다.)"""
     if len(data) > MAX_MESSAGE_BYTES:
         return "too_large"
+    i = data.rfind(_CRC_KEY)
+    tail = _CRC_TAIL.fullmatch(data, i + len(_CRC_KEY)) if i > 0 else None
+    if tail is None or zlib.crc32(data[:i]) != int(tail.group(1)):
+        return "bad_crc"
     try:
         d = json.loads(data.decode("utf-8"), parse_constant=_reject_constant)
     except (UnicodeDecodeError, ValueError, RecursionError):
         return "bad_json"
-    if not isinstance(d, dict):
+    if not isinstance(d, dict) or "crc" not in d:
         return "bad_json"
+    del d["crc"]
     if d.get("v") != PROTOCOL_VERSION or type(d.get("v")) is not int:
         return "bad_version"
     cls = _TYPES.get(d.get("type")) if isinstance(d.get("type"), str) else None

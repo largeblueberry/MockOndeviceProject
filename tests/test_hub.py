@@ -65,26 +65,49 @@ def test_hub_tick_flow_with_loopback():
     hub = Hub(hub_cfg(), clock, transport=net.endpoint(("c", 5005)), outputs=[rec], first_confirm_id=50)
     hub.transport.open()
 
-    def report(ep, node, seq, cid=None, confirm=None):
-        ep.send(encode(Report(node, "b" + node, seq, State.CLEAR, True, 0, "clear", 100, cid, confirm)), ("c", 5005))
+    def report(ep, node, seq, cid=None, confirm=None, echo=None, hold=None):
+        ep.send(encode(Report(node, "b" + node, seq, State.CLEAR, True, 0, "clear", 100, cid, confirm, echo, hold)),
+                ("c", 5005))
 
     assert hub.tick().kind == K.UNKNOWN                                     # 아무도 없음
-    report(a, "A", 1), report(b, "B", 1)
+    first = decode(a.recv(0)[0])                                            # 첫 Control (seq는 임의 시작값)
+    decode(b.recv(0)[0])
+    report(a, "A", 1), report(b, "B", 1)                                    # 아직 echo 없음
+    while hub.poll(0):
+        pass
+    assert hub.tick().reason == "A_no_rtt"                                  # 왕복 시간을 모르면 EMPTY 쪽으로 못 감
+    clock.advance(0.03)
+    report(a, "A", 2, echo=first.seq, hold=10), report(b, "B", 2, echo=first.seq, hold=10)
     while hub.poll(0):
         pass
     v = hub.tick()
     assert (v.kind, v.confirm_id) == (K.CHECKING, 50)
-    ctl = decode(a.recv(0)[0])                                              # 노드마다 Control이 간다
-    ctl = decode(a.recv(0)[0])
+    assert v.nodes[0].transit_ms == pytest.approx(20)                       # 30 ms 왕복 - 노드가 들고 있던 10 ms
+    while (m := a.recv(0)) is not None:
+        ctl = decode(m[0])
     assert isinstance(ctl, Control) and ctl.confirm_id == 50 and decode(b.recv(0)[0]).node == "C"
     clock.advance(0.2)
-    report(a, "A", 2, 50, "empty"), report(b, "B", 2, 50, "empty")
+    report(a, "A", 3, 50, "empty", ctl.seq, 0), report(b, "B", 3, 50, "empty", ctl.seq, 0)
     a.send(b"garbage", ("c", 5005))
     while hub.poll(0):
         pass
     assert hub.tick().kind == K.EMPTY
-    assert hub.counts["bad_json"] == 1
-    assert [x.kind for x in rec.got] == [K.UNKNOWN, K.CHECKING, K.EMPTY]
+    assert hub.counts["bad_crc"] == 1
+    assert [x.kind for x in rec.got] == [K.UNKNOWN, K.UNKNOWN, K.CHECKING, K.EMPTY]
+
+
+def test_old_or_unknown_echo_gives_no_rtt():
+    """C가 기억하지 못하는 Control seq(재시작 전 C, 아주 오래된 것)를 echo하면 왕복 시간을 모른다."""
+    clock = FakeClock()
+    net = LoopbackNetwork(clock)
+    a = net.endpoint(("a", 5006))
+    a.open()
+    hub = Hub(hub_cfg(), clock, transport=net.endpoint(("c", 5005)), outputs=[])
+    hub.transport.open()
+    hub.tick()
+    a.send(encode(Report("A", "x", 1, State.CLEAR, True, 0, "clear", 50, None, None, 123, 0)), ("c", 5005))
+    hub.poll(0)
+    assert hub.tracker.latest("A", clock.now()).transit_s is None and hub.counts["no_echo"] == 1
 
 
 def node_cfg(name, hub_addr, bind, objects_timeline):
@@ -160,6 +183,6 @@ def test_restart_is_not_counted_as_rejected():
     a.send(encode(r), ("c", 5005))
     while hub.poll(0):
         pass
-    assert hub.tracker.counts["restart"] == 1 and hub.counts == {"wrong_type": 0, "dup": 1}
+    assert hub.tracker.counts["restart"] == 1 and hub.counts == {"wrong_type": 0, "no_echo": 2, "dup": 1}
     from psafe.outputs.verdict_api import format_verdict
     assert "A: 0명 FAULT (shutdown)" in format_verdict(hub.tick())

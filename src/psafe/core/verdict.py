@@ -27,6 +27,7 @@ class NodeView:
     reason: str                       # 그 노드의 reason, 무응답이면 "timeout"
     evidence_age_ms: float | None     # C 시계 기준 근거 나이 (§7.4.3). 모르면 None
     confirm: str | None               # 현재 confirm_id에 대한 그 노드의 답. 다른 번호에 대한 답이면 None
+    transit_ms: float | None = None   # 노드 -> C 전달 시간 상한 (왕복 시간). 근거 나이에 이미 포함됨. 모르면 None
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,3 +41,19 @@ class Verdict:
     @property
     def safe(self) -> bool:
         return self.kind == VerdictKind.EMPTY
+
+
+# ---- ESP32 연결 (DESIGN.md §7.4.6 매핑) -------------------------------------
+# 순수한 데이터 변환이라 여기에 둔다. outputs(브리지)와 safety가 서로 import하지 않게 하기 위해서다.
+
+VERDICT_STATES: dict[VerdictKind, State] = {
+    VerdictKind.EMPTY: State.CLEAR,
+    VerdictKind.OCCUPIED: State.OCCUPIED,
+    VerdictKind.CHECKING: State.VERIFYING,
+    VerdictKind.UNKNOWN: State.FAULT,
+}
+
+
+def to_protocol(v: Verdict) -> tuple[State, bool]:
+    """Verdict -> ESP32 프로토콜 v1의 (STATE, SAFE). Y는 EMPTY일 때만."""
+    return VERDICT_STATES[v.kind], v.kind == VerdictKind.EMPTY
