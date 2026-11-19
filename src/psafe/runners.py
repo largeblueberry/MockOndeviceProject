@@ -16,6 +16,7 @@ from psafe.app import Components
 from psafe.core.clock import FakeClock
 from psafe.core.packets import Decision, FrameDetections, FramePacket, State, unsafe
 from psafe.core.slot import LatestSlot
+from psafe.safety.confirm import NO_CONFIRM, ConfirmStatus
 
 log = logging.getLogger("psafe.runner")
 
@@ -55,6 +56,31 @@ def expire_decision(d: Decision, now: float, max_age_s: float) -> Decision | Non
     return None
 
 
+def step_confirm(c: Components, d: Decision) -> ConfirmStatus:
+    """worker가 판단을 낼 때마다: C의 현재 확인 요청에 이 판단을 반영한다 (§7.4.5).
+    링크가 없으면 항상 NO_CONFIRM."""
+    if c.link is None or c.confirm is None:
+        return NO_CONFIRM
+    return c.confirm.step(c.link.request(c.clock.now()), d)
+
+
+def send_report(c: Components, d: Decision, confirm: ConfirmStatus) -> None:
+    """하트비트마다: C에게 Report를 보낸다. 실패해도 다른 출력을 막지 않는다
+    (C는 무응답으로 판정한다)."""
+    if c.link is None:
+        return
+    try:
+        c.link.send_report(d, confirm, c.clock.now())
+    except Exception:
+        log.exception("link report failed")
+
+
+def expired_confirm(confirm: ConfirmStatus) -> ConfirmStatus:
+    """하트비트가 판단을 N으로 바꿔 보낼 때, 확인 결과도 '실패'로 바꾼다.
+    (worker가 멈춘 동안 '비었음'을 계속 echo하면 안 된다.)"""
+    return confirm if confirm.confirm_id is None else ConfirmStatus(confirm.confirm_id, "fault")
+
+
 def notify_frame(c: Components, pkt: FramePacket, dets: FrameDetections | None, decision: Decision) -> None:
     for o in c.outputs:
         try:
@@ -82,6 +108,9 @@ def open_all(c: Components, stack: ExitStack) -> float:
     for o in c.outputs:
         o.open()
         stack.callback(o.close)
+    if c.link is not None:
+        c.link.open()
+        stack.callback(c.link.close)
     c.detector.load()
     stack.callback(c.detector.close)
     c.detector.warmup()
@@ -95,6 +124,7 @@ def open_all(c: Components, stack: ExitStack) -> float:
 class RunResult:
     start: float = 0.0                 # Source를 연 시각
     decisions: list[Decision] = field(default_factory=list)
+    confirms: list[ConfirmStatus] = field(default_factory=list)   # decisions와 같은 순서 (링크가 없으면 NO_CONFIRM)
     frames: int = 0                    # 모델이 처리한 프레임 수
     timeouts: int = 0                  # 프레임 없이 끝난 대기 횟수
     skipped: int = 0                   # 처리가 느려서 Source가 건너뛴 프레임 수
@@ -136,6 +166,9 @@ class SyncRunner:
                 pkt = c.source.read()
                 if pkt is None:
                     break
+                if c.link is not None:
+                    while c.link.poll(0):         # 지금까지 도착한 Control을 모두 반영
+                        pass
                 # 직전 프레임/판단 이후 간격이 크면 -> worker라면 시간 초과가 났을 것.
                 while pkt.timestamp - last_t > self.frame_timeout_s:
                     last_t += self.frame_timeout_s
@@ -152,7 +185,7 @@ class SyncRunner:
                     log.info("stop requested by output")
                     break
 
-            self._emit(unsafe(State.FAULT, "shutdown", c.clock.now()), result, record=False)
+            self._emit(unsafe(State.FAULT, "shutdown", c.clock.now()), result, record=False, final=True)
 
         result.skipped = getattr(c.source, "skipped", 0)
         log.info(
@@ -161,11 +194,15 @@ class SyncRunner:
         )
         return result
 
-    def _emit(self, decision: Decision, result: RunResult, record: bool = True) -> None:
+    def _emit(self, decision: Decision, result: RunResult, record: bool = True, final: bool = False) -> None:
+        # Sync 모드에서는 판단 1개 = worker 1회 = 하트비트 1회로 본다.
+        confirm = expired_confirm(self.c.confirm.status) if final and self.c.confirm else step_confirm(self.c, decision)
         for o in self.c.outputs:
             o.send(decision)
+        send_report(self.c, decision, confirm)
         if record:
             result.decisions.append(decision)
+            result.confirms.append(confirm)
 
 
 # ---------------------------------------------------------------------------
@@ -180,14 +217,20 @@ class DecisionBoard:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._d: Decision | None = None
+        self._confirm = NO_CONFIRM
 
-    def publish(self, d: Decision) -> None:
+    def publish(self, d: Decision, confirm: ConfirmStatus = NO_CONFIRM) -> None:
+        """판단과 그 판단 시점의 확인 상태를 한 쌍으로 게시한다 (따로 읽으면 어긋날 수 있다)."""
         with self._lock:
-            self._d = d
+            self._d, self._confirm = d, confirm
 
     def latest(self) -> Decision | None:
         with self._lock:
             return self._d
+
+    def snapshot(self) -> tuple[Decision | None, ConfirmStatus]:
+        with self._lock:
+            return self._d, self._confirm
 
 
 class ThreadedRunner:
@@ -238,6 +281,8 @@ class ThreadedRunner:
                 threading.Thread(target=self._guard("worker", self._worker_loop), name="worker", daemon=True),
                 threading.Thread(target=self._guard("heartbeat", self._heartbeat_loop), name="heartbeat", daemon=True),
             ]
+            if c.link is not None:
+                threads.append(threading.Thread(target=self._guard("link-rx", self._link_loop), name="link-rx", daemon=True))
             for t in threads:
                 t.start()
             try:
@@ -251,7 +296,9 @@ class ThreadedRunner:
                     t.join(self.JOIN_TIMEOUT_S)
                     if t.is_alive():
                         log.warning("thread %s did not stop (blocked in a call?); abandoning it", t.name)
-                self._send_all(unsafe(State.FAULT, "shutdown", c.clock.now()))
+                final = unsafe(State.FAULT, "shutdown", c.clock.now())
+                self._send_all(final)
+                send_report(c, final, expired_confirm(self.board.snapshot()[1]))
 
         r.skipped = getattr(c.source, "skipped", 0)
         r.dropped = self.frame_slot.dropped
@@ -335,11 +382,11 @@ class ThreadedRunner:
                 return
             if pkt is None:
                 decision = c.fsm.on_no_frame(c.clock.now())
-                self.board.publish(decision)
+                self.board.publish(decision, step_confirm(c, decision))
                 r.timeouts += 1
             else:
                 decision, dets = process_frame(c, pkt)
-                self.board.publish(decision)        # 먼저 게시: 화면 그리기가 하트비트를 늦추면 안 된다
+                self.board.publish(decision, step_confirm(c, decision))   # 먼저 게시: 화면 그리기가 하트비트를 늦추면 안 된다
                 r.frames += 1
                 r.infer_ms_total += dets.infer_ms if dets else 0.0
                 notify_frame(c, pkt, dets, decision)
@@ -351,13 +398,14 @@ class ThreadedRunner:
         next_t = c.clock.now()
         while not self._stop.is_set():
             now = c.clock.now()
-            d = self.board.latest()
+            d, confirm = self.board.snapshot()
             if d is None:
                 d = unsafe(State.INIT, "no_decision_yet", now)
             elif (stale := expire_decision(d, now, self.max_decision_age_s)) is not None:
-                d = stale
+                d, confirm = stale, expired_confirm(confirm)
                 r.stale_heartbeats += 1
             self._send_all(d)
+            send_report(c, d, confirm)
             r.heartbeats += 1
 
             next_t += self.period_s
@@ -365,6 +413,11 @@ class ThreadedRunner:
             if delay < 0:          # 밀렸으면 (예: 느린 Output) 따라잡으려고 몰아서 보내지 않는다
                 next_t, delay = c.clock.now(), 0.0
             self._stop.wait(delay)
+
+    def _link_loop(self) -> None:
+        link = self.c.link
+        while not self._stop.is_set():
+            link.poll(0.05)
 
     def _send_all(self, d: Decision) -> None:
         for o in self.c.outputs:

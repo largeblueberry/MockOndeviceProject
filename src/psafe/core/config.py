@@ -10,7 +10,8 @@ dict는 선택된 클래스의 생성자로 그대로 전달되므로, 새 구�
 
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any, get_type_hints
+from types import UnionType
+from typing import Any, get_args, get_type_hints
 
 import yaml
 
@@ -54,6 +55,17 @@ class RunnerConfig:
 
 
 @dataclass
+class LinkConfig:
+    """A·B 노드가 C와 통신할 때 (DESIGN.md §7.4). 없으면 단독 실행 (지금까지와 같음)."""
+    node: str                          # 이 노드 이름: "A" / "B"
+    hub: str                           # C의 수신 주소 "호스트:포트" (예: "192.168.20.30:5005")
+    bind: str = "0.0.0.0:5006"         # 이 노드가 Control을 받는 주소
+    hub_node: str = "C"
+    node_timeout_ms: float = 500.0     # C가 이 시간 동안 조용하면 확인 요청을 버린다
+    confirm_frames: int = 10           # CONFIRM에서 '비었음'에 필요한 요청 이후 깨끗한 프레임 수 (K, 미확정)
+
+
+@dataclass
 class AppConfig:
     source: ComponentConfig
     model: ComponentConfig
@@ -61,6 +73,7 @@ class AppConfig:
     fsm: FsmConfig = field(default_factory=FsmConfig)
     health: HealthConfig = field(default_factory=HealthConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)
+    link: LinkConfig | None = None
 
 
 class ConfigError(ValueError):
@@ -78,6 +91,11 @@ def _build(cls: type, data: Any, path: str) -> Any:
     kwargs = {}
     for name, value in data.items():
         hint = hints[name]
+        if isinstance(hint, UnionType):           # 예: LinkConfig | None
+            if value is None:
+                kwargs[name] = None
+                continue
+            hint = next((a for a in get_args(hint) if is_dataclass(a)), hint)
         if is_dataclass(hint):
             kwargs[name] = _build(hint, value, f"{path}.{name}")
         elif getattr(hint, "__origin__", None) is list and is_dataclass(hint.__args__[0]):
@@ -100,7 +118,32 @@ def parse_config(data: dict[str, Any]) -> AppConfig:
         raise ConfigError(f"config.runner.clock: must be auto|real|fake, got {cfg.runner.clock!r}")
     if len(cfg.fsm.roi) < 3:
         raise ConfigError("config.fsm.roi: polygon needs at least 3 points")
+    if cfg.link is not None:
+        _check_link(cfg.link)
     return cfg
+
+
+def parse_address(text: str) -> tuple[str, int]:
+    """"호스트:포트" -> (호스트, 포트)."""
+    host, sep, port = str(text).rpartition(":")
+    if not sep or not host or not port.isdigit() or not 0 <= int(port) <= 65535:
+        raise ConfigError(f"address must be 'host:port', got {text!r}")
+    return host, int(port)
+
+
+def _check_link(link: LinkConfig) -> None:
+    for name in ("node", "hub_node"):
+        v = getattr(link, name)
+        if not isinstance(v, str) or not 1 <= len(v) <= 64 or not v.isascii() or not v.isprintable():
+            raise ConfigError(f"config.link.{name}: must be 1..64 printable ASCII chars, got {v!r}")
+    if link.node == link.hub_node:
+        raise ConfigError("config.link.node: must differ from hub_node")
+    parse_address(link.hub)
+    parse_address(link.bind)
+    if link.node_timeout_ms <= 0:
+        raise ConfigError("config.link.node_timeout_ms: must be > 0")
+    if not isinstance(link.confirm_frames, int) or link.confirm_frames < 1:
+        raise ConfigError("config.link.confirm_frames: must be an int >= 1")
 
 
 def load_config(path: str | Path) -> AppConfig:

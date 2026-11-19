@@ -54,6 +54,7 @@ class Decision:
     seq: int            # 이 판단을 만든 프레임 번호 (없으면 -1)
     timestamp: float    # 그 프레임의 촬영 시각
     decided_at: float   # 판단을 내린 시각 (Clock 기준)
+    count: int = 0      # 이 프레임에서 ROI 안에 있던 사람 수 (OCCUPIED일 때만 > 0). 보드 간 통신용 (§7.4)
 
     @property
     def yn(self) -> str:

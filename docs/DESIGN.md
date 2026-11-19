@@ -153,6 +153,7 @@
 | `state` | str | FSM 현재 상태 (8장) |
 | `reason` | str | 판단 근거 (예: `person_in_roi`, `clear_3.0s`, `stale_frame`) |
 | `seq`, `timestamp` | | 근거가 된 프레임 |
+| `count` | int | 그 프레임에서 ROI 안에 있던 사람 수 (`OCCUPIED`일 때만 > 0, 기본 0). 보드 간 통신용 (7.4) |
 
 > 출력은 지금은 Y/N만 사용하지만, `state`/`reason`을 함께 실어 두면 추후 경고등·부저·화면 표시 등으로 확장할 때 Output 모듈만 추가하면 된다.
 
@@ -310,6 +311,156 @@ RPi → ESP32, **주기 200ms** (Decision이 바뀌지 않아도 계속 송신 =
 
 구현: RPi `src/psafe/outputs/protocol.py`(인코딩·수신 로직), ESP32 `firmware/esp32/psafe_gate/psafe_gate.ino`. **두 파일의 상수는 항상 같아야 한다.**
 
+### 7.4 보드 간 통신 (v0 초안, 2026-11-19)
+
+> 상태: 초안. 임계값(`K`, `confirm_timeout_s` 등)은 팀 합의 후 확정.
+
+#### 7.4.1 구성
+```
+ [RPi A] NIR 카메라 ─┐                       ┌─► Display (추상화, 7.5)
+   (출구 쪽)         │  report (200ms, UDP)  │
+                     ├──────────► [RPi C] ───┤
+ [RPi B] NIR 카메라 ─┘ ◄──────────  허브·판정 └─► ESP32 ─► LED (프로토콜 v1, 7.3)
+   (반대쪽)            control (200ms, UDP)
+```
+- **A, B**: 기존 파이프라인 그대로 사람을 센다. 판단 결과를 C로 보고한다.
+- **C**: 카메라 없음. A·B 보고를 모아 최종 판정(`Verdict`)을 낸다. **별도 서버를 두지 않고 C가 허브를 맡는다.**
+- 최종 판단은 사람(주차 관리자)이 한다. 시스템은 판정을 **보여 주기만** 한다. 문은 자동으로 닫지 않는다.
+
+#### 7.4.2 전송 방식 — UDP + JSON
+
+| 항목 | 결정 | 이유 |
+|---|---|---|
+| 형식 | JSON (UTF-8, 메시지 1개 = UDP 데이터그램 1개) | 사람이 읽을 수 있어 로그·디버깅이 쉽다. 200 B 수준이라 파싱 비용은 무시할 수 있다 |
+| 전송 | **UDP** | TCP는 밀린 데이터를 버리지 않고 늦게라도 배달한다. 오래된 보고가 한꺼번에 도착하는 것은 LatestSlot(3.2)으로 막으려던 문제와 같다. UDP는 하나를 잃어도 200 ms 뒤 다음 보고가 온다 |
+| 방식 | **명령이 아니라 상태를 주기적으로 보낸다** (양방향 200 ms) | 하트비트가 따로 필요 없고, ACK·재전송·중복 처리도 필요 없다. 프로토콜 v1과 같은 철학 |
+| 주소 | 고정 IP + 포트, config에 기록 (C 수신 `5005`, A·B 수신 `5006`) | 자동 탐색(mDNS)은 고장 지점만 늘린다 |
+| 네트워크 | 유선 스위치 권장 | Wi-Fi면 손실·지연을 측정한 뒤 `node_timeout_ms`를 다시 정한다 |
+| 구현 | Python 표준 `socket` + `json` | 의존성 없음. PC 한 대에서 포트만 바꿔 A·B·C를 모두 띄울 수 있다 (원칙 6) |
+| 보안 | MVP 생략 (폐쇄망 가정) | 확장 시 HMAC 필드 추가 |
+
+비교한 대안: HTTP(요청/응답 구조라 주기 보고에 맞지 않고 TCP 문제가 그대로 있다), MQTT(C에 브로커를 설치해야 하므로 사실상 서버가 생긴다. 3대 규모에 과하다), TCP JSON 줄 단위(오래된 데이터가 쌓이고 재연결을 처리해야 한다).
+
+#### 7.4.3 시계 규칙 — 파이끼리 시각을 비교하지 않는다
+파이마다 시계가 다르므로(수 초씩 어긋날 수 있다) **A의 시각을 C의 시계와 비교하지 않는다.**
+- A·B는 보낼 때 자기 시계로 **"판단 근거 프레임이 몇 ms 전 것인가"(`evidence_age_ms`)** 를 계산해 싣는다.
+- C는 받은 시각을 자기 시계로 기록한다.
+- `C가 보는 근거 나이 = evidence_age_ms + (C_now − C_수신시각)`. 네트워크 지연(LAN에서 수 ms)은 무시한다.
+
+#### 7.4.4 메시지
+
+**A/B → C: `report`** (200 ms마다, 판단이 바뀌지 않아도 송신)
+```json
+{"v":1, "type":"report", "node":"A", "boot":"3f2a91", "seq":1234,
+ "state":"CLEAR", "safe":true, "count":0, "reason":"clear",
+ "evidence_age_ms":120, "confirm_id":7, "confirm":"empty"}
+```
+
+| 필드 | 값 |
+|---|---|
+| `v` | 프로토콜 버전. 지금은 `1` |
+| `node` | `"A"` / `"B"` |
+| `boot` | 프로세스를 시작할 때마다 새로 만드는 임의 문자열. 재시작으로 `seq`가 0이 되어도 이상이 아니라 재시작으로 구분한다 |
+| `seq` | 송신마다 1씩 증가 (같은 `boot` 안에서) |
+| `state`, `safe`, `reason` | 그 노드의 최신 `Decision` (4.3) |
+| `count` | ROI 안의 사람 수. **`Decision`에 필드 추가 필요** (7.4.7) |
+| `evidence_age_ms` | 근거 프레임 나이. 근거 프레임이 없으면(`seq == -1`) `null` |
+| `confirm_id` | 마지막으로 받은 C의 `confirm_id`. 없으면 `null` |
+| `confirm` | `null`(요청 없음) / `"pending"` / `"empty"` / `"occupied"` / `"fault"` |
+
+**C → A/B: `control`** (200 ms마다, A·B 각각에게)
+```json
+{"v":1, "type":"control", "node":"C", "boot":"c01d2e", "seq":88, "confirm_id":7}
+```
+- `confirm_id`: 진행 중이거나 유지 중인 확인 번호. 없으면 `null`. 새 확인을 시작할 때만 값을 바꾼다.
+
+**수신 규칙 (양쪽 공통)**
+- JSON 파싱 실패, `v` 불일치, 필드 누락·타입·범위 위반 → 무시하고 카운트
+- `safe == true`인데 `state != "CLEAR"` → 규칙 위반으로 무시 (프로토콜 v1과 같은 규칙)
+- 같은 `boot`에서 이전보다 작거나 같은 `seq` → 무시 (지연 도착·중복)
+- `boot`가 바뀌면 재시작으로 보고 받아들인다. 단 **이미 지나간 `boot`의 메시지는 무시**한다 (재시작 전 프로세스가 보낸 메시지가 늦게 도착하면 옛 판단이 되살아난다)
+- 필드 집합은 정확히 일치해야 한다 (빠진 필드·모르는 필드 모두 거부). 형식을 바꾸면 `v`를 올린다. 512 B 초과, `NaN` 등 비표준 JSON도 거부
+- 판단에 쓰는 시각은 모두 **받는 쪽 시계**다 (7.4.3)
+- **노드별로 마지막 유효 메시지 후 `node_timeout_ms`(500 ms) 동안 유효 메시지가 없으면 그 노드는 무응답**
+- 부팅 직후는 모든 노드가 무응답 상태로 시작한다
+
+#### 7.4.5 CONFIRM — 명령 + ACK가 아니라 상태 echo
+1. C는 A·B가 모두 `CLEAR`(Y)이고 신선하면 **새 `confirm_id`** 를 발급해 `control`에 계속 싣는다.
+2. A·B는 처음 보는 `confirm_id`를 받으면 **받은 시점 이후에 촬영한 프레임만으로** 확인한다. 이전 판단을 재사용하지 않는다.
+   - 신선하고 정상인 프레임 `K`장이 모두 사람 0명 → `"empty"`
+   - 그 사이 사람 감지 → `"occupied"`, 카메라 이상·stale → `"fault"`
+   - 결과가 나올 때까지는 `"pending"`. 결과는 같은 `confirm_id`와 함께 계속 echo한다.
+3. C는 **A와 B 모두 현재 `confirm_id`에 대해 `"empty"`** 라고 답했을 때만 `EMPTY`를 낸다.
+4. `confirm_timeout_s` 안에 결과가 없으면 `UNKNOWN(confirm_timeout)`으로 보고, 조건이 다시 맞으면 새 `confirm_id`로 재시도한다.
+5. `EMPTY`는 A·B가 계속 `CLEAR`·신선함을 유지하는 동안만 지속된다. 어느 한쪽이라도 깨지면 즉시 해제되고, 다시 `EMPTY`를 내려면 **새 확인이 필요하다.**
+
+메시지가 유실되거나 중복돼도 다음 주기에 같은 상태가 다시 오므로, 재전송 로직을 따로 두지 않는다.
+
+#### 7.4.6 C의 판정 (`Verdict`)
+
+| `kind` | 조건 (위에서부터 우선) | 프로토콜 v1 매핑 (→ ESP32) |
+|---|---|---|
+| `UNKNOWN` | 어느 노드든 무응답, `FAULT`, 근거가 오래됨, 버전 불일치, 확인 시간 초과, C 부팅 직후 | `FAULT` / N |
+| `OCCUPIED` | 어느 노드든 `count > 0` 또는 `confirm == "occupied"` | `OCCUPIED` / N |
+| `CHECKING` | 둘 다 사람 0명, CONFIRM 진행 중 | `VERIFYING` / N |
+| `EMPTY` | 7.4.5의 3번 조건 충족 | `CLEAR` / **Y** |
+
+- **판단 기준은 "합계 == 0"이다.** A·B가 겹쳐 보는 구역에서 같은 사람이 두 번 세어져도 0이 아니게 되므로 안전 쪽 오류다. 진짜 위험은 겹침이 아니라 **두 카메라 모두의 사각지대**다 (현장 사각지대 시험 필요).
+- 같은 사람이 두 번 세어질 수 있으므로 **화면에는 합계가 아니라 노드별 인원**을 보여 준다.
+- 사람 감지는 즉시 반영하고, `EMPTY`는 확인을 거친 뒤에만 낸다 (비대칭 판단, 원칙 3).
+- Aggregator는 FSM처럼 **I/O 없는 순수 로직**으로 만든다: `step(reports, now) -> Verdict`. SyncRunner + FakeClock으로 "B 무응답", "확인 중 A가 사람 감지", "A 재시작" 같은 시나리오를 테스트한다.
+
+#### 7.4.7 기존 구조와의 연결
+- **구현됨 (2026-11-19):** `src/psafe/link/` — `messages.py`(형식·검증), `transport.py`(`Transport` 인터페이스, `UdpTransport`, 고장 주입 가능한 `LoopbackNetwork`), `peer.py`(`PeerTracker`). 테스트 `tests/test_link.py`.
+- **구현됨 (2026-11-19, A·B 쪽):** `Decision.count`, `safety/confirm.py`(`ConfirmTracker`), `link/node.py`(`NodeLink`), Runner 연결. 테스트 `tests/test_confirm.py`.
+  - 설정에 `link:` 절이 있을 때만 켜진다 (`node`, `hub`, `bind`, `hub_node`, `node_timeout_ms`, `confirm_frames`). 없으면 지금까지와 똑같이 단독 실행.
+  - 스레드: `link-rx`(새로 추가)가 Control을 받아 현재 요청을 갱신 → `worker`가 판단마다 `ConfirmTracker.step(요청, Decision)` → 판단과 확인 상태를 **한 쌍으로** 게시 → `heartbeat`가 기존 Output과 함께 Report 송신.
+  - 요청은 `(C의 boot, confirm_id)`로 구분한다. C가 재시작해 같은 번호를 다시 써도 새 요청이 된다. 요청을 받은 시각은 **처음 받은 시각**으로 고정된다 (매 Control마다 갱신하면 근거 프레임이 영원히 쌓이지 않는다).
+  - 하트비트가 판단을 `decision_stale` N으로 바꿔 보낼 때, 확인 결과도 `fault`로 바꾼다. 종료 시 마지막 Report도 `shutdown` + `fault`.
+  - **C 쪽 구현 시 주의:** `confirm_id`는 부팅마다 임의 값에서 시작한다. 0부터 시작하면, 재시작 전 번호에 대한 A의 `empty` echo가 늦게 도착했을 때 새 요청에 대한 답으로 오인할 수 있다.
+- **A·B:** 새 Output `udp_report` 하나를 추가한다. `send()`가 이미 하트비트(200 ms)마다 호출되므로 구조가 그대로 맞는다. 다만 `control` 수신(`confirm_id`)을 FSM 쪽으로 전달할 경로가 필요하다. 지금 Output은 송신만 하므로 이 부분은 새로 설계한다.
+- **계약 변경:** `Decision`에 `count: int`(ROI 안 사람 수)를 추가한다. 4.3과 `core/packets.py`를 함께 고친다.
+- **C:** 카메라 파이프라인이 아니라 `UdpReceiver → Aggregator → VerdictOutput들(7.5)` 구조다. 하트비트 스레드가 200 ms마다 최신 `Verdict`를 모든 출력에 전달한다.
+
+### 7.5 C의 출력 — 디스플레이 추상화 + LED
+
+#### 7.5.1 역할 분담
+| 출력 | 역할 | C가 죽으면 |
+|---|---|---|
+| **LED (ESP32 경유)** | **기준 신호.** 관리자가 1차로 보는 것 | ESP32 워치독(500 ms)이 N으로 바꾼다. 초록이 남지 않는다 |
+| **디스플레이** | 보조 정보 (노드별 인원, 사유, 확인 진행 상황) | 화면이 멈출 수 있다 → 7.5.3 규칙으로 드러낸다 |
+
+> ⚠️ C의 GPIO로 LED를 직접 켜지 않는다. 프로그램이 죽어도 핀은 마지막 상태(초록)로 남는다. ESP32와 프로토콜 v1(7.3)을 그대로 재사용하고, `Verdict → (STATE, SAFE)` 매핑은 7.4.6 표를 따른다. STATE별 LED 색(노랑 = `VERIFYING` 등)은 펌웨어에서 처리한다.
+
+#### 7.5.2 `Verdict` (Aggregator → 출력)
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `kind` | `EMPTY` / `OCCUPIED` / `CHECKING` / `UNKNOWN` | 최종 판정 |
+| `reason` | str | 예: `confirmed`, `person_A`, `node_B_timeout`, `confirm_timeout` |
+| `nodes` | dict[str, NodeView] | 노드별 `count`, `state`, 무응답 여부, 근거 나이(ms) |
+| `confirm_id` | int \| None | 현재 확인 번호 |
+| `decided_at` | float | 판정 시각 (C의 Clock 기준) |
+
+#### 7.5.3 디스플레이 인터페이스 (기종 미정 → 추상화)
+디스플레이 종류(HDMI 모니터, 소형 LCD, 웹 페이지 등)는 아직 정하지 않는다. **"최종 판정을 받아 보여 준다"** 는 역할은 바뀌지 않으므로 인터페이스만 고정한다. 모양은 기존 `Output`(14.3)과 같다.
+
+```
+VerdictOutput
+  open()                    장치 준비
+  show(verdict)             하트비트마다(200 ms) 호출. 바뀔 때만이 아니다. 가볍고 막히지 않아야 한다
+  poll() -> bool            선택. 메인 스레드에서 호출 (GUI용). False = 종료 요청
+  close()                   종료. 가능하면 "판단 불가" 화면을 남긴다
+```
+
+모든 구현체가 지켜야 할 표시 규칙:
+1. `kind`를 색과 글자로 함께 표시한다 (색만으로 구분하지 않는다).
+2. `OCCUPIED`이면 **노드별 인원**을 표시한다 (합계 아님, 7.4.6).
+3. **`UNKNOWN`이면 반드시 사유를 표시한다.**
+4. **살아 있음 표시:** 매 `show()`마다 바뀌는 요소(시계, 깜빡이는 점)와 "마지막 갱신 N초 전"을 넣는다. C가 멈추면 관리자가 화면이 멈춘 것을 알 수 있어야 한다.
+5. 구현체가 C와 **다른 프로세스나 장치**(브라우저, 별도 MCU의 LCD 등)라면, `show()`가 1초 넘게 오지 않을 때 스스로 화면 전체를 `UNKNOWN(display_stale)`으로 바꾼다.
+
+먼저 만들 구현체: `console`(텍스트), `mock`(테스트용 기록). 실제 디스플레이는 기종이 정해지면 구현체를 하나 추가한다.
+
 ---
 
 ## 8. FSM (판단 로직)
@@ -419,6 +570,7 @@ bootcampProject/
 │   ├── sources/           # source_api(인터페이스), dummy, video, webcam, picamera
 │   ├── detectors/         # detector_api(인터페이스), dummy, yolo_onnx (전처리 포함)
 │   ├── safety/            # fsm(상태 머신), roi, health (순수 로직)
+│   ├── link/              # 보드 간 통신: messages(Report·Control), transport(UDP·Loopback), peer(수신 추적)
 │   ├── outputs/           # output_api(인터페이스), console, viewer, serial_out(ESP32), mock_mcu, protocol(패킷 인코딩)
 │   ├── runners.py         # ThreadedRunner, SyncRunner
 │   └── __main__.py        # python -m psafe --config config/default.yaml
@@ -527,5 +679,9 @@ files.download("yolo11n_320.onnx"); files.download("yolo11n_640.onnx")
 - [ ] 시연 대상: 레고 피규어 vs 사람 손 → 파인튜닝 여부 (5.5)
 - [ ] 차량 내부 잔류자까지 감지 범위에 포함할지
 - [ ] 입차/출차 구분을 FSM에 넣을지 (MVP 이후)
-- [ ] ESP32 출력 장치 (LED, 부저, 릴레이 등)
+- [ ] ESP32 출력 장치 (LED, 부저, 릴레이 등) → LED는 ESP32 경유로 결정 (7.5). 색·개수 미정
+- [ ] 디스플레이 기종 (7.5.3은 인터페이스만 고정)
+- [ ] 보드 간 통신 임계값: CONFIRM 프레임 수 `K`, `confirm_timeout_s`, `node_timeout_ms` (7.4)
+- [ ] 네트워크: 유선 스위치 vs Wi-Fi (Wi-Fi면 손실·지연 실측 후 `node_timeout_ms` 재결정)
+- [ ] A·B가 C의 `confirm_id`를 받아 FSM에 전달하는 경로 (7.4.7)
 - [ ] 보조 센서(mmWave, PIR, 초음파) 사용 가능 여부

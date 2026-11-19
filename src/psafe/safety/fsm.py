@@ -51,9 +51,9 @@ class SafetyFSM:
         if fault:
             return self.fault(fault, now, dets)
 
-        if self._person_in_roi(dets):
+        if n := self._persons_in_roi(dets):
             self._clear_frames = 0
-            return self._go(State.OCCUPIED, False, "person_in_roi", now, dets)
+            return self._go(State.OCCUPIED, False, "person_in_roi", now, dets, count=n)
 
         if self.state == State.FAULT:
             self._recover_frames += 1
@@ -97,10 +97,10 @@ class SafetyFSM:
             return "frame_gap"
         return None
 
-    def _person_in_roi(self, dets: FrameDetections) -> bool:
-        return any(
-            o.cls == "person" and o.conf >= self.cfg.person_conf_low and self.roi.touches(o.bbox)
-            for o in dets.objects
+    def _persons_in_roi(self, dets: FrameDetections) -> int:
+        return sum(
+            1 for o in dets.objects
+            if o.cls == "person" and o.conf >= self.cfg.person_conf_low and self.roi.touches(o.bbox)
         )
 
     def _start_verifying(self, now: float, dets: FrameDetections) -> Decision:
@@ -108,10 +108,12 @@ class SafetyFSM:
         self._clear_frames = 1
         return self._go(State.VERIFYING, False, "verifying", now, dets)
 
-    def _go(self, state: State, safe: bool, reason: str, now: float, dets: FrameDetections | None) -> Decision:
+    def _go(
+        self, state: State, safe: bool, reason: str, now: float, dets: FrameDetections | None, count: int = 0
+    ) -> Decision:
         if state != self.state:
             log.debug("%s -> %s (%s)", self.state.value, state.value, reason)
             self.state = state
         if dets is None:
             return unsafe(state, reason, now)
-        return Decision(safe, state, reason, dets.seq, dets.timestamp, now)
+        return Decision(safe, state, reason, dets.seq, dets.timestamp, now, count)
