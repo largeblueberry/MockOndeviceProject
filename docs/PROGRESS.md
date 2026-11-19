@@ -153,8 +153,7 @@ Source ──▶ HealthMonitor ──▶ Detector ──▶ SafetyFSM ──▶ 
 - Report에 카메라 상태 수치를 넣을지 → 보류 (HW에서 받을 수 있는지 모름)
 
 ### 4.4 커밋 안 된 변경
-2026-11-19 문서 정리분: README·DESIGN·CODE_GUIDE·PROGRESS·STRATEGY·EXPERIMENTS(E-17~E-19)를 다중 보드 구조에 맞게 갱신. 코드: 판정 → ESP32 매핑 `to_protocol`을 `safety/aggregator.py`에서 `core/verdict.py`로 이동 (부품 패키지끼리 import하지 않는 구조 유지). 통신 코드 본체는 커밋됨 (e863542, 5485387).
-2026-11-19 M6.5: `core/clock.py`(`OffsetClock`), `sim.py`, `tests/test_multisim.py`, **프로토콜 v2** (`link/messages.py` CRC·echo, `link/peer.py` `transit_s`, `link/node.py` echo 송신, `hub.py` 왕복 시간 계산·Control seq 임의 시작, `safety/aggregator.py` 근거 나이에 왕복 시간 포함·`*_no_rtt`), 관련 테스트 수정, 문서(DESIGN §7.4.3·7.4.4·7.4.6·§12·§15, EXPERIMENTS E-17·E-20·E-21·EXP-010, CODE_GUIDE, 이 파일).
+없음 (2026-11-19 작업분은 브랜치 `feat/multiboard-sim-v2`에 커밋. main에 합치려면 `git checkout main && git merge --ff-only feat/multiboard-sim-v2`).
 
 ---
 
