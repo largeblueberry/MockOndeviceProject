@@ -10,20 +10,26 @@
 """
 
 import logging
+import secrets
 import threading
+from collections import OrderedDict
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 
 from psafe.core.clock import Clock, FakeClock, RealClock
 from psafe.core.config import HubAppConfig, parse_address
 from psafe.core.verdict import NodeView, Verdict, VerdictKind
-from psafe.link.messages import Control, Report, decode, encode, new_boot_id
+from psafe.link.messages import MAX_SEQ, Control, Report, decode, encode, new_boot_id
 from psafe.link.peer import PeerTracker
 from psafe.link.transport import Address, Transport, UdpTransport
 from psafe.outputs import VERDICT_OUTPUTS, VerdictOutput
 from psafe.safety.aggregator import Aggregator
 
 log = logging.getLogger("psafe.hub")
+
+# 기억할 Control 송신 시각 수. 200 ms마다 1개 -> 64개 = 12.8초. 이보다 오래된 Control을 echo하면
+# 왕복 시간을 모르는 것으로 본다 (= 근거 나이를 모름 -> EMPTY 불가).
+SENT_HISTORY = 64
 
 
 @dataclass
@@ -55,8 +61,10 @@ class Hub:
             VERDICT_OUTPUTS.create(o.name, inject, **o.options) for o in cfg.outputs
         ]
         self._lock = threading.Lock()
-        self._seq = 0
-        self.counts: dict[str, int] = {"wrong_type": 0}
+        # Control seq는 부팅마다 임의 값에서 시작한다: 재시작 전 seq에 대한 echo를 새 seq로 오인하지 않게
+        self._seq = secrets.randbelow(2**31)
+        self._sent: OrderedDict[int, float] = OrderedDict()   # Control seq -> 보낸 시각 (C 시계)
+        self.counts: dict[str, int] = {"wrong_type": 0, "no_echo": 0}
 
     # ---- 수신 --------------------------------------------------------------
 
@@ -71,8 +79,10 @@ class Hub:
         elif not isinstance(msg, Report):
             self._count("wrong_type")
         else:
+            now = self.clock.now()
+            transit = self._transit(msg, now)
             with self._lock:
-                r = self.tracker.feed(msg, self.clock.now())
+                r = self.tracker.feed(msg, now, transit)
             if r not in ("ok", "restart"):          # restart는 받아들인 것이다 (tracker.counts에 따로 있음)
                 self._count(r)
         return True
@@ -96,8 +106,21 @@ class Hub:
             except Exception:
                 log.exception("verdict output %s failed", type(o).__name__)
 
+    def _transit(self, r: Report, now: float) -> float | None:
+        """노드 -> C 전달 시간의 상한 = 왕복 시간 (E-21). 모두 C 시계의 길이로만 계산한다:
+            RTT = (Report 받은 시각 - echo한 Control을 보낸 시각) - 노드가 들고 있던 시간
+        한 방향 지연은 왕복 시간보다 클 수 없다. echo가 없거나 모르는 seq면 None (= 근거 나이를 모름)."""
+        if r.echo_seq is None or r.echo_seq not in self._sent:
+            self._count("no_echo")
+            return None
+        rtt = (now - self._sent[r.echo_seq]) - r.echo_hold_ms / 1000.0
+        return max(0.0, rtt)
+
     def send_control(self, confirm_id: int | None) -> None:
-        self._seq += 1
+        self._seq = (self._seq + 1) % (MAX_SEQ + 1)
+        self._sent[self._seq] = self.clock.now()
+        while len(self._sent) > SENT_HISTORY:
+            self._sent.popitem(last=False)
         data = encode(Control(self.node, self.boot, self._seq, confirm_id))
         for addr in self.peers.values():
             self.transport.send(data, addr)

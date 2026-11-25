@@ -7,7 +7,7 @@ import pytest
 from psafe.core.clock import FakeClock
 from psafe.core.packets import State
 from psafe.link.messages import (
-    _FIELDS, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, Control, Report, decode, encode, new_boot_id,
+    _FIELDS, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, Control, Report, decode, encode, encode_raw, new_boot_id,
 )
 from psafe.link.peer import PeerTracker
 from psafe.link.transport import LinkFault, LoopbackNetwork, UdpTransport
@@ -27,7 +27,8 @@ def control(**kw) -> Control:
 
 
 def raw(d: dict) -> bytes:
-    return json.dumps(d).encode()
+    """CRC는 맞지만 내용은 마음대로인 메시지 (내용 검사를 시험하려고)."""
+    return encode_raw(d)
 
 
 # ---- 메시지 ---------------------------------------------------------------
@@ -47,7 +48,7 @@ def test_field_sets_match_to_dict():
 def test_report_size_is_well_under_limit():
     big = report(node="X" * 64, boot="b" * 64, reason="r" * 64, seq=2**53 - 1,
                  evidence_age_ms=2**53 - 1, confirm_id=2**53 - 1, confirm="occupied", safe=False,
-                 state=State.FAULT)
+                 state=State.FAULT, echo_seq=2**53 - 1, echo_hold_ms=2**53 - 1)
     assert len(encode(big)) < MAX_MESSAGE_BYTES
 
 
@@ -60,6 +61,7 @@ def test_report_size_is_well_under_limit():
     dict(count=-1), dict(seq=-1), dict(seq=True),    # bool은 int로 받지 않는다
     dict(node=""), dict(node="노드"), dict(reason="a\nb"),
     dict(evidence_age_ms=1.5),
+    dict(echo_seq=1), dict(echo_hold_ms=1), dict(echo_seq=1, echo_hold_ms=-1),
 ])
 def test_invalid_reports_cannot_be_built(kw):
     with pytest.raises(ValueError):
@@ -68,9 +70,17 @@ def test_invalid_reports_cannot_be_built(kw):
 
 def test_decode_rejections():
     good = report().to_dict()
-    assert decode(b"\xff\xfe") == "bad_json"
-    assert decode(b"{not json") == "bad_json"
-    assert decode(b"[1,2]") == "bad_json"
+    assert decode(b"\xff\xfe") == "bad_crc"
+    assert decode(b"{not json") == "bad_crc"
+    assert decode(json.dumps(good).encode()) == "bad_crc"                # v1처럼 CRC 없음
+    assert decode(encode_raw({"x": 1})[:-1] + b"}") is not None
+    data = encode(report())
+    assert decode(data.replace(b'"seq":1,', b'"seq":9,')) == "bad_crc"   # 내용 1바이트 변조
+    assert decode(data[:-3] + b"00}") == "bad_crc"                       # CRC 값 변조
+    assert decode(data + b" ") == "bad_crc"                              # 꼬리 뒤 쓰레기
+    head = b"[1,2"
+    import zlib
+    assert decode(head + b',"crc":' + str(zlib.crc32(head)).encode() + b"}") == "bad_json"   # CRC는 맞지만 JSON 아님
     assert decode(b"x" * (MAX_MESSAGE_BYTES + 1)) == "too_large"
     assert decode(raw({**good, "v": PROTOCOL_VERSION + 1})) == "bad_version"
     assert decode(raw({**good, "v": True})) == "bad_version"
@@ -83,7 +93,9 @@ def test_decode_rejections():
     assert decode(raw({**good, "state": "VERIFYING"})) == "invalid"      # safe=true인데 CLEAR 아님
     assert decode(raw({**good, "safe": 1})) == "invalid"
     assert decode(raw({**good, "evidence_age_ms": "120"})) == "invalid"
-    assert decode(b'{"v":1,"type":"control","node":"C","boot":"c","seq":NaN,"confirm_id":null}') == "bad_json"
+    nan_head = b'{"v":2,"type":"control","node":"C","boot":"c","seq":NaN,"confirm_id":null'
+    assert decode(nan_head + b',"crc":' + str(zlib.crc32(nan_head)).encode() + b"}") == "bad_json"
+    assert decode(raw({**good, "echo_seq": 3})) == "invalid"                # echo_hold_ms 없이 echo_seq만
 
 
 def test_decode_never_raises_on_garbage():
@@ -204,7 +216,7 @@ def test_loopback_faults_end_to_end_through_tracker():
             if t.feed(msg, clock.now()) in ("ok", "restart"):
                 accepted.append(msg.seq)
     assert accepted == sorted(accepted) and len(set(accepted)) == len(accepted)
-    assert rejected                                          # 깨진 메시지는 decode에서 걸러진다
+    assert set(rejected) == {"bad_crc"}                      # 깨진 메시지는 모두 CRC에서 걸러진다 (E-20)
     assert t.counts["dup"] > 0                               # 중복·뒤늦은 도착은 tracker에서 걸러진다
 
 

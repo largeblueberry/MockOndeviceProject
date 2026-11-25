@@ -1,8 +1,8 @@
 # 주차 타워 안전 감지 시스템 — 설계 문서 (MVP v0.1)
 
-> 작성일: 2026-11-14 · 상태: 초안 (사전 MVP 단계)
-> 목적: 프로젝트(2주) 시작 전, SW 큰 틀과 인터페이스를 확정하고 팀에 공유한다.
-> 원칙: **이 문서는 "무엇을/왜"를 공유한다. 코드는 공유하지 않는다.** 팀원은 인터페이스 명세를 보고 각 모듈을 직접 구현한다.
+> 작성일: 2026-11-14 · 갱신: 2026-11-19 (다중 보드 통신 §7.4~7.5) · 상태: 초안 (사전 MVP 단계)
+> 목적: 프로젝트(2주) 시작 전, SW 큰 틀과 인터페이스를 확정한다.
+> 원칙: **이 문서는 "무엇을/왜"를 기록한다.** 이 저장소는 방향성을 확인하는 mock 프로젝트이며, SW 설계(인터페이스·프로토콜)는 직접 정한다 (2026-11-19).
 
 ---
 
@@ -11,11 +11,11 @@
 | 항목 | 내용 |
 |---|---|
 | 주제 | 주차 타워 입·출차 시 사람이 구역을 완전히 벗어났는지 판단하는 안전 감지 모델 및 SW/HW |
-| 연산 장치 | Raspberry Pi 4 |
-| 보조 MCU | ESP32 |
-| 센서 | 카메라 (기종·대수 미정) |
+| 연산 장치 | Raspberry Pi 4 × 3: **A·B** = 카메라 노드(사람 수 세기), **C** = 허브(A·B 보고를 모아 최종 판정, 카메라 없음) (§7.1, §7.4) |
+| 보조 MCU | ESP32 (C에 연결, LED 구동 + 워치독) |
+| 센서 | NIR 카메라 2대 (A: 출구 쪽, B: 반대쪽, 각 120°). 기종 미정 |
 | 시연 환경 | 실물 타워가 아닌 **모형(레고 등)** 기반 시연 |
-| 최종 출력 | **Y / N** (Y = 동작 안전, N = 동작 불가). 확장 가능하게 설계 |
+| 최종 출력 | 노드(A·B): **Y / N**. C: **판정 4가지** (`EMPTY` 비었음 확인 / `OCCUPIED` 사람 있음 / `CHECKING` 확인 중 / `UNKNOWN` 판단 불가) → 디스플레이 + LED. **최종 판단은 관리자**가 한다 (자동으로 문을 닫지 않는다) |
 | 개발 언어 | Python 기본, 병목 구간만 C로 최적화 (프로파일링 결과로 결정) |
 | 기간 | 사전 MVP 1주 + 본 프로젝트 2주 |
 
@@ -41,6 +41,8 @@
 ## 3. 시스템 아키텍처
 
 ### 3.1 파이프라인 — 논리 구조 (v0.2)
+
+> 이 절은 **카메라 노드 하나(A 또는 B)** 의 구조다. 보드 3대를 묶는 구성(A·B → C)은 §7.4, C의 출력은 §7.5.
 
 논리적 흐름은 `INPUT → 전처리 → 모델 → FSM → OUTPUT` 그대로지만, **실행 단위(스레드)는 3개로 묶는다.**
 
@@ -69,6 +71,7 @@
 - **열기 순서: Output → Detector(load·warmup) → Source(카메라 마지막)**. 모델 로딩 동안 쌓인 프레임이 첫 판단부터 stale이 되지 않게.
 - **어떤 스레드든 죽으면 run 종료** (`result.error`). 종료 시 **마지막 송신은 항상 N(`shutdown`)**. 재시작은 systemd, 그 사이 공백은 ESP32 워치독이 커버.
 - Output 하나의 예외가 다른 Output을 막지 않는다 (각각 try/except).
+- **설정에 `link:`가 있으면 (다중 보드, §7.4.7)** 스레드 `link-rx`가 하나 더 생겨 C의 Control을 받는다. worker는 판단마다 확인 상태(`ConfirmTracker`)를 갱신해 판단과 **한 쌍으로** 게시하고, heartbeat는 Output 송신과 함께 C에게 Report를 보낸다. `link:`가 없으면 지금과 같다.
 
 **v0.1 → v0.2 변경 이유**
 - **전처리를 모델 안으로**: 입력 크기·정규화·색 순서는 모델마다 다르다. 전처리를 따로 두면 모델 교체 시 두 곳을 고쳐야 한다.
@@ -156,6 +159,13 @@
 | `count` | int | 그 프레임에서 ROI 안에 있던 사람 수 (`OCCUPIED`일 때만 > 0, 기본 0). 보드 간 통신용 (7.4) |
 
 > 출력은 지금은 Y/N만 사용하지만, `state`/`reason`을 함께 실어 두면 추후 경고등·부저·화면 표시 등으로 확장할 때 Output 모듈만 추가하면 된다.
+
+### 4.4 보드 간 계약 (다중 보드)
+| 타입 | 방향 | 정의 | 설명 |
+|---|---|---|---|
+| `Report` | A·B → C | `link/messages.py`, §7.4.4 | 노드의 최신 `Decision` + 확인(CONFIRM) 진행 상황 |
+| `Control` | C → A·B | `link/messages.py`, §7.4.4 | 현재 `confirm_id` |
+| `Verdict` | C 내부: Aggregator → 출력 | `core/verdict.py`, §7.5.2 | C의 최종 판정 4가지 + 노드별 상태 |
 
 ---
 
@@ -271,8 +281,11 @@ python -m psafe --scenario "scenarios/*.yaml" --check     # 전체 시나리오 
 ### 7.1 역할
 | 장치 | 역할 |
 |---|---|
-| **Raspberry Pi 4** | 영상 입력, 전처리, 추론, FSM 판단, 로그·녹화 |
-| **ESP32** | 판단 결과 수신, 실제 I/O(릴레이·LED·부저 등), **워치독** |
+| **RPi A, B** (카메라 노드) | 영상 입력, 전처리, 추론, FSM 판단(§3, §8). 판단과 사람 수를 200 ms마다 C에 보고, C의 확인 요청 처리 (§7.4) |
+| **RPi C** (허브) | 카메라 없음. A·B 보고를 모아 최종 판정(`Verdict`), 디스플레이 표시, ESP32로 LED 신호 송신 (§7.4.6, §7.5) |
+| **ESP32** (C에 연결) | 판정 수신, LED 구동, **워치독** (500 ms 무신호 → N) |
+
+> 단일 보드 구성(RPi 1대 + ESP32)도 그대로 동작한다. 설정에 `link:`가 없으면 RPi가 판단을 ESP32에 직접 보낸다 (§7.2, §7.3). §7.2~7.3의 "RPi"는 다중 보드에서는 C다.
 
 > 안전 원칙: **ESP32는 RPi의 Y 신호가 "주기적으로" 들어올 때만 동작을 허가한다.** 신호가 끊기면(RPi 다운, 케이블 빠짐) 자동으로 N. → RPi 소프트웨어가 멈춰도 안전.
 
@@ -345,37 +358,48 @@ RPi → ESP32, **주기 200ms** (Decision이 바뀌지 않아도 계속 송신 =
 파이마다 시계가 다르므로(수 초씩 어긋날 수 있다) **A의 시각을 C의 시계와 비교하지 않는다.**
 - A·B는 보낼 때 자기 시계로 **"판단 근거 프레임이 몇 ms 전 것인가"(`evidence_age_ms`)** 를 계산해 싣는다.
 - C는 받은 시각을 자기 시계로 기록한다.
-- `C가 보는 근거 나이 = evidence_age_ms + (C_now − C_수신시각)`. 네트워크 지연(LAN에서 수 ms)은 무시한다.
+- **보내는 데 걸린 시간(전달 지연)은 왕복 시간으로 상한을 잰다 (v2, E-21).** 노드는 마지막으로 받은 Control의 `seq`(`echo_seq`)와, 그걸 받은 뒤 이 Report를 보낼 때까지 걸린 시간(`echo_hold_ms`, 노드 시계의 **길이**)을 싣는다. C는 그 Control을 보낸 시각을 기억하므로 자기 시계만으로 계산한다:
+  `왕복 시간 = (C가 Report를 받은 시각 − 그 Control을 보낸 시각) − echo_hold_ms`. 한 방향 지연은 왕복 시간보다 클 수 없다.
+- `C가 보는 근거 나이 = evidence_age_ms + 왕복 시간 + (C_now − C_수신시각)`. 실제 나이보다 크게(안전 쪽으로) 잡힌다.
+- 왕복 시간을 모르면(echo 없음, C가 기억하지 못하는 seq) 근거 나이도 모른다 → `EMPTY` 불가 (`*_no_rtt`).
+
+> v1(2026-11-19 오전)은 "LAN 지연은 수 ms라 무시한다"고 가정했다. 통합 시뮬레이션에서 A→C 지연 2.5초를 주자 사람이 있는 동안 C가 `EMPTY`를 13번 냈다 (E-21). 지연이 수 초로 커지는 일(Wi-Fi 버퍼링, 스위치 이상)은 드물지만, 생기면 바로 안전 문제다.
 
 #### 7.4.4 메시지
 
 **A/B → C: `report`** (200 ms마다, 판단이 바뀌지 않아도 송신)
 ```json
-{"v":1, "type":"report", "node":"A", "boot":"3f2a91", "seq":1234,
+{"v":2, "type":"report", "node":"A", "boot":"3f2a91", "seq":1234,
  "state":"CLEAR", "safe":true, "count":0, "reason":"clear",
- "evidence_age_ms":120, "confirm_id":7, "confirm":"empty"}
+ "evidence_age_ms":120, "confirm_id":7, "confirm":"empty",
+ "echo_seq":88, "echo_hold_ms":35, "crc":2117696796}
 ```
 
 | 필드 | 값 |
 |---|---|
-| `v` | 프로토콜 버전. 지금은 `1` |
+| `v` | 프로토콜 버전. 지금은 `2` (2026-11-19: CRC, 왕복 시간 echo 추가) |
 | `node` | `"A"` / `"B"` |
 | `boot` | 프로세스를 시작할 때마다 새로 만드는 임의 문자열. 재시작으로 `seq`가 0이 되어도 이상이 아니라 재시작으로 구분한다 |
 | `seq` | 송신마다 1씩 증가 (같은 `boot` 안에서) |
 | `state`, `safe`, `reason` | 그 노드의 최신 `Decision` (4.3) |
-| `count` | ROI 안의 사람 수. **`Decision`에 필드 추가 필요** (7.4.7) |
+| `count` | ROI 안의 사람 수 (`Decision.count`) |
 | `evidence_age_ms` | 근거 프레임 나이. 근거 프레임이 없으면(`seq == -1`) `null` |
 | `confirm_id` | 마지막으로 받은 C의 `confirm_id`. 없으면 `null` |
 | `confirm` | `null`(요청 없음) / `"pending"` / `"empty"` / `"occupied"` / `"fault"` |
+| `echo_seq` | 마지막으로 받은 C의 Control `seq`. C가 무응답이면 `null` (7.4.3) |
+| `echo_hold_ms` | 그 Control을 받은 뒤 이 Report를 보낼 때까지 (노드 시계의 길이). `echo_seq`와 항상 함께 |
+| `crc` | **항상 마지막 필드.** `,"crc":` 앞까지 바이트 전체의 CRC-32 (zlib). 깨진 메시지는 JSON 해석 전에 거부 (E-20) |
 
 **C → A/B: `control`** (200 ms마다, A·B 각각에게)
 ```json
-{"v":1, "type":"control", "node":"C", "boot":"c01d2e", "seq":88, "confirm_id":7}
+{"v":2, "type":"control", "node":"C", "boot":"c01d2e", "seq":88, "confirm_id":7, "crc":1234567890}
 ```
 - `confirm_id`: 진행 중이거나 유지 중인 확인 번호. 없으면 `null`. 새 확인을 시작할 때만 값을 바꾼다.
+- `seq`: **부팅마다 임의 값에서 시작**한다. C는 최근 64개(12.8초)의 송신 시각을 기억해 왕복 시간 계산에 쓴다. 재시작 전 C의 seq에 대한 echo는 새 C가 모르는 번호라 왕복 시간 '모름'이 된다.
+- `crc`: Report와 같다.
 
 **수신 규칙 (양쪽 공통)**
-- JSON 파싱 실패, `v` 불일치, 필드 누락·타입·범위 위반 → 무시하고 카운트
+- **CRC 불일치(`bad_crc`)**, JSON 파싱 실패, `v` 불일치, 필드 누락·타입·범위 위반 → 무시하고 카운트
 - `safe == true`인데 `state != "CLEAR"` → 규칙 위반으로 무시 (프로토콜 v1과 같은 규칙)
 - 같은 `boot`에서 이전보다 작거나 같은 `seq` → 무시 (지연 도착·중복)
 - `boot`가 바뀌면 재시작으로 보고 받아들인다. 단 **이미 지나간 `boot`의 메시지는 무시**한다 (재시작 전 프로세스가 보낸 메시지가 늦게 도착하면 옛 판단이 되살아난다)
@@ -401,7 +425,7 @@ RPi → ESP32, **주기 200ms** (Decision이 바뀌지 않아도 계속 송신 =
 | `kind` | 조건 (위에서부터 우선) | 프로토콜 v1 매핑 (→ ESP32) |
 |---|---|---|
 | `OCCUPIED` | 어느 노드든 `count > 0`, `state == OCCUPIED`, 또는 현재 확인에 `"occupied"`로 답함 | `OCCUPIED` / N |
-| `UNKNOWN` | 어느 노드든 무응답, `FAULT`, `INIT`, 근거가 오래됨(`CLEAR`인데 C 기준 근거 나이 > 1000 ms), 확인 실패(`"fault"`)·시간 초과, C 부팅 직후 | `FAULT` / N |
+| `UNKNOWN` | 어느 노드든 무응답, `FAULT`, `INIT`, 왕복 시간 모름(`*_no_rtt`), 근거가 오래됨(`CLEAR`인데 C 기준 근거 나이 > 1000 ms, 왕복 시간 포함), 확인 실패(`"fault"`)·시간 초과, C 부팅 직후 | `FAULT` / N |
 | `CHECKING` | 사람은 없지만 어느 노드가 아직 `CLEAR`가 아님(자기 FSM 확인 중), 또는 CONFIRM 진행 중 | `VERIFYING` / N |
 | `EMPTY` | 7.4.5의 3번 조건 충족 | `CLEAR` / **Y** |
 
@@ -420,10 +444,10 @@ RPi → ESP32, **주기 200ms** (Decision이 바뀌지 않아도 계속 송신 =
   - 요청은 `(C의 boot, confirm_id)`로 구분한다. C가 재시작해 같은 번호를 다시 써도 새 요청이 된다. 요청을 받은 시각은 **처음 받은 시각**으로 고정된다 (매 Control마다 갱신하면 근거 프레임이 영원히 쌓이지 않는다).
   - 하트비트가 판단을 `decision_stale` N으로 바꿔 보낼 때, 확인 결과도 `fault`로 바꾼다. 종료 시 마지막 Report도 `shutdown` + `fault`.
   - **C 쪽 구현 시 주의:** `confirm_id`는 부팅마다 임의 값에서 시작한다. 0부터 시작하면, 재시작 전 번호에 대한 A의 `empty` echo가 늦게 도착했을 때 새 요청에 대한 답으로 오인할 수 있다.
-- **A·B:** 새 Output `udp_report` 하나를 추가한다. `send()`가 이미 하트비트(200 ms)마다 호출되므로 구조가 그대로 맞는다. 다만 `control` 수신(`confirm_id`)을 FSM 쪽으로 전달할 경로가 필요하다. 지금 Output은 송신만 하므로 이 부분은 새로 설계한다.
-- **계약 변경:** `Decision`에 `count: int`(ROI 안 사람 수)를 추가한다. 4.3과 `core/packets.py`를 함께 고친다.
-- **C:** 카메라 파이프라인이 아니라 `UdpReceiver → Aggregator → VerdictOutput들(7.5)` 구조다. 하트비트 스레드가 200 ms마다 최신 `Verdict`를 모든 출력에 전달한다.
-- **구현됨 (2026-11-19, C 판정):** `core/verdict.py`(`Verdict`, `NodeView`, `VerdictKind`), `safety/aggregator.py`(`Aggregator`, `to_protocol`), `outputs/verdict_api.py`(`VerdictOutput` 인터페이스, `VERDICT_OUTPUTS` 레지스트리, `console`, 기존 Output을 감싸는 `decision` 브리지). 테스트 `tests/test_aggregator.py`. 
+- **A·B 설계 결정:** 처음에는 Report 송신을 새 Output(`udp_report`)으로 만들 계획이었다. 하지만 Report에는 `Decision` 외에 확인 상태도 실어야 하고, 이를 위해 `Output.send(decision)` 시그니처를 바꾸면 기존 출력이 모두 영향을 받는다. 그래서 **Runner의 하트비트가 직접 호출하는 링크 부품(`NodeLink`)** 으로 만들었다. Control 수신도 같은 부품이 맡는다 (`link-rx` 스레드).
+- **계약 변경:** `Decision`에 `count: int = 0`(ROI 안 사람 수)을 추가했다 (§4.3, `core/packets.py`). 기본값이 있어 기존 코드는 그대로 동작한다.
+- **C:** 카메라 파이프라인이 아니라 `수신(PeerTracker) → Aggregator → VerdictOutput들(7.5)` 구조다. 하트비트 스레드가 200 ms마다 판정해 모든 출력에 전달하고, 같은 주기로 각 노드에 Control을 보낸다.
+- **구현됨 (2026-11-19, C 판정):** `core/verdict.py`(`Verdict`, `NodeView`, `VerdictKind`), `safety/aggregator.py`(`Aggregator`), `core/verdict.py`의 `to_protocol`(판정 → ESP32 매핑), `outputs/verdict_api.py`(`VerdictOutput` 인터페이스, `VERDICT_OUTPUTS` 레지스트리, `console`, 기존 Output을 감싸는 `decision` 브리지). 테스트 `tests/test_aggregator.py`. 
 - **구현됨 (2026-11-19, C 실행):** `hub.py`(`Hub`, `HubRunner`: 수신 스레드 + 하트비트[판정 → 출력 → Control 송신] + 감독). 설정 파일에 `hub:` 절이 있으면 `python -m psafe --config config/hub_c.yaml`이 C로 실행된다. PC 한 대 시험용 설정 `config/hub_c.yaml`, `config/node_a.yaml`, `config/node_b.yaml`(127.0.0.1). 실측은 EXPERIMENTS EXP-009.
 
 ### 7.5 C의 출력 — 디스플레이 추상화 + LED
@@ -558,7 +582,35 @@ runner:
   heartbeat_ms: 200
   max_decision_age_ms: 600  # heartbeat가 보낼 판단(또는 Y의 근거 프레임)이 이보다 오래되면 N
   metrics_interval_s: 5
+link:                       # 선택. 있으면 다중 보드의 카메라 노드(A·B)로 동작 (§7.4)
+  node: A
+  hub: 192.168.20.30:5005   # C의 수신 주소
+  bind: 0.0.0.0:5006        # 이 노드가 Control을 받는 주소
+  hub_node: C
+  node_timeout_ms: 500      # C가 이 시간 동안 조용하면 확인 요청을 버린다
+  confirm_frames: 10        # CONFIRM에서 '비었음'에 필요한 요청 이후 깨끗한 프레임 수 (K, 미확정)
 ```
+
+**C(허브) 설정**은 형식이 다르다. 카메라·모델이 없고 `hub:` 절이 있다. `python -m psafe --config X.yaml`은 파일에 `hub:` 절이 있으면 C로 실행한다. 실제 파일: `config/hub_c.yaml`
+
+```yaml
+hub:
+  node: C
+  bind: 0.0.0.0:5005        # A·B의 Report를 받는 주소
+  nodes:
+    - { name: A, address: 192.168.20.31:5006 }
+    - { name: B, address: 192.168.20.32:5007 }
+  heartbeat_ms: 200
+  node_timeout_ms: 500
+  max_evidence_age_ms: 1000 # CLEAR인데 C 기준 근거 나이가 이보다 크면 UNKNOWN(*_stale)
+  confirm_timeout_s: 3.0
+  metrics_interval_s: 5
+outputs:                    # VerdictOutput 레지스트리 (§7.5.3)
+  - { name: console, options: {} }
+  - { name: decision, options: { output: serial, options: { port: /dev/ttyUSB0 } } }   # ESP32 LED
+```
+
+IP는 예시다. 실기 배치가 정해지면 바꾼다.
 
 ---
 
@@ -570,13 +622,14 @@ bootcampProject/
 ├── config/                # config.yaml
 ├── scenarios/             # Dummy 시나리오 정의
 ├── src/psafe/
-│   ├── core/              # 패킷, LatestSlot, Clock(Real/Fake), config 로딩, 메트릭
+│   ├── core/              # 패킷, Verdict(C 판정), LatestSlot, Clock(Real/Fake), config 로딩, 메트릭
 │   ├── sources/           # source_api(인터페이스), dummy, video, webcam, picamera
 │   ├── detectors/         # detector_api(인터페이스), dummy, yolo_onnx (전처리 포함)
-│   ├── safety/            # fsm(상태 머신), roi, health (순수 로직)
-│   ├── link/              # 보드 간 통신: messages(Report·Control), transport(UDP·Loopback), peer(수신 추적)
-│   ├── outputs/           # output_api(인터페이스), console, viewer, serial_out(ESP32), mock_mcu, protocol(패킷 인코딩)
-│   ├── runners.py         # ThreadedRunner, SyncRunner
+│   ├── safety/            # fsm(상태 머신), roi, health, confirm(A·B 확인), aggregator(C 판정) — 순수 로직
+│   ├── link/              # 보드 간 통신: messages(Report·Control), transport(UDP·Loopback), peer(수신 추적), node(A·B 쪽 링크)
+│   ├── outputs/           # output_api(인터페이스), console, viewer, serial_out(ESP32), mock_mcu, protocol(패킷 인코딩), verdict_api(C 출력 인터페이스)
+│   ├── runners.py         # ThreadedRunner, SyncRunner (카메라 노드)
+│   ├── hub.py             # Hub, HubRunner (C)
 │   └── __main__.py        # python -m psafe --config config/default.yaml
 ├── firmware/esp32/psafe_gate/  # ESP32 펌웨어 (패킷 수신 + 워치독 + 출력)
 └── tests/                 # 시나리오 기반 테스트
@@ -613,12 +666,17 @@ bootcampProject/
 | M4 | 주말~월 | 실제 모델(YOLO ONNX) PC에서 연결, 영상/웹캠 입력 | 모델 이름만 바꿔 교체 동작 |
 | M4.5 | 월 | 시리얼 출력 + 프로토콜 v1 + MockMCU + ESP32 펌웨어 + 점검 도구 | `mcucheck` 7/7 통과 (실기) — 2026-11-16 완료 |
 | M5 | M4.5 이후 | RPi 이식, 카메라, 속도 측정, RPi ↔ ESP32 연결 | RPi에서 end-to-end Y/N |
+| M6 | 2026-11-19 | 다중 보드 통신: 메시지·전송·수신 추적(`link/`), A·B 확인 처리, C 판정·출력 인터페이스, C 실행 | PC 한 대에서 A·B·C 프로세스 3개 실제 UDP 연결 (EXP-009) — **완료** |
+| M6.5 | 2026-11-19 | A·B·C 통합 시뮬레이션 (`sim.py`: Loopback + FakeClock + 노드마다 다른 시계, 유실·지연·깨짐·단절·재시작 주입) → E-20·E-21 발견, 프로토콜 v2로 수정 | 무작위 30종 포함 "사람 있는데 EMPTY" 0회 (EXP-010) — **완료** |
+| M7 | 실기 | 파이 3대 + 스위치로 이식, 실제 네트워크 손실·지연 측정 | `node_timeout_ms` 등 실측 기반 확정 |
 
 > M1~M3는 **HW·모델 없이** 진행 가능. 시스템의 뼈대(판단 로직·안전 정책)를 먼저 검증하고, 모델은 나중에 끼운다.
 
 ---
 
 ## 13. 팀 공유 계획
+
+> 2026-11-19: 이 저장소는 방향성 확인용 mock 프로젝트라 팀 공유를 전제로 하지 않는다. 아래는 초기 계획으로 남겨 둔다.
 - 공유: 이 문서 (아키텍처, 데이터 계약, 인터페이스 명세, 시나리오 목록, 프로토콜)
 - 비공유: 구현 코드
 - 모듈 분배안 (예시):
@@ -641,6 +699,7 @@ bootcampProject/
 | 학습 / export | `ultralytics` | **PC/Colab 전용.** RPi에는 설치 안 함 (무거움) |
 | 설정 | `PyYAML` + `dataclasses` | 의존성 최소화 |
 | 시리얼 | `pyserial` | ESP32 통신 |
+| 보드 간 통신 | 표준 `socket`(UDP) + `json` | 의존성 없음. 서버·브로커 없이 C가 허브 (§7.4.2) |
 | 테스트 | `pytest` | 시나리오 테스트 + FSM 단위 테스트 |
 | 로그 | 표준 `logging` | 상태 전이·메트릭 |
 | ESP32 | Arduino IDE (또는 PlatformIO) | HW 입문자 기준 Arduino 프레임워크 |
@@ -666,6 +725,8 @@ files.download("yolo11n_320.onnx"); files.download("yolo11n_640.onnx")
 | `default.yaml` | dummy 시나리오 | dummy | 로직 개발·테스트 |
 | `webcam_yolo.yaml` | 웹캠 | YOLO ONNX | 실시간 + 뷰어 (시연 화면) |
 | `video_yolo.yaml` | 녹화 클립 | YOLO ONNX | 반복 가능한 모델 비교 |
+| `node_a.yaml`, `node_b.yaml` | dummy 시나리오 (`scenarios/multi/`) | dummy | 다중 보드 카메라 노드 A·B. PC 한 대 시험용(`127.0.0.1`) |
+| `hub_c.yaml` | — (`hub:` 절) | — | 다중 보드 허브 C. 출력: console + 가짜 ESP32(`mock_mcu`) |
 
 카메라 점검·클립 녹화: `python -m psafe.tools.camcheck [--record recordings/x.mp4]` — health 임계값(밝기, 프레임 차이)을 **실측**해서 설정에 반영한다.
 
@@ -675,6 +736,8 @@ files.download("yolo11n_320.onnx"); files.download("yolo11n_640.onnx")
 | `send(decision)` | heartbeat | 200ms마다 | ESP32, 콘솔 |
 | `on_frame(pkt, dets, decision)` | worker | 처리된 프레임마다 | 뷰어, 녹화 (Decision 게시 **후** 호출 → 그리기가 판단을 늦추지 않음) |
 | `poll() -> bool` | main | ~30Hz | GUI(imshow/waitKey). False = 종료 요청 |
+
+C의 출력(`VerdictOutput`, §7.5.3)은 `show(verdict)`(heartbeat, 200 ms마다)와 `poll()`(main)만 있다. 기존 Output(ESP32 등)은 `decision` 브리지로 감싸서 그대로 쓴다.
 
 ---
 
@@ -687,5 +750,10 @@ files.download("yolo11n_320.onnx"); files.download("yolo11n_640.onnx")
 - [ ] 디스플레이 기종 (7.5.3은 인터페이스만 고정)
 - [ ] 보드 간 통신 임계값: CONFIRM 프레임 수 `K`, `confirm_timeout_s`, `node_timeout_ms` (7.4)
 - [ ] 네트워크: 유선 스위치 vs Wi-Fi (Wi-Fi면 손실·지연 실측 후 `node_timeout_ms` 재결정)
-- [ ] A·B가 C의 `confirm_id`를 받아 FSM에 전달하는 경로 (7.4.7)
+- [x] A·B가 C의 `confirm_id`를 받아 FSM에 전달하는 경로 (7.4.7) → `link-rx` 스레드 + `ConfirmTracker` (FSM은 그대로)
+- [x] 파이마다 다른 시계에서의 동작 검증 → M6.5 시뮬레이션: 시계 오프셋을 바꿔도 판정 순서가 완전히 같음 (EXP-010)
+- [ ] Report에 카메라 상태 수치(밝기·대비·정지 판정값)를 넣을지 → **보류** (2026-11-19). HW에서 그 값을 받을 수 있는지 모르므로 지금은 `reason`만
 - [ ] 보조 센서(mmWave, PIR, 초음파) 사용 가능 여부
+- [ ] 보드 간 메시지 인증 (E-26): 지금은 폐쇄망 가정. 필요하면 HMAC 필드(v3) 또는 설정된 노드 주소만 받기
+- [ ] 두 카메라 공통 사각지대 현장 시험 (E-22)
+- [ ] 다중 보드 엣지 케이스 전체 목록: EXPERIMENTS §1.1(미해결)·§1.4(해결), 실기 확인 계획: EXP-011

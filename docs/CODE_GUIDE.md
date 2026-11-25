@@ -10,8 +10,8 @@
 
 | 표시 | 의미 | 대상 파일 |
 |---|---|---|
-| 🔓 **계약** | 팀에 공유되는 파일. 모듈 간 **데이터 형식**과 **인터페이스**를 정의한다 | `core/packets.py`, `sources/source_api.py`, `detectors/detector_api.py`, `outputs/output_api.py` |
-| 🔨 **구현** | 각 담당자가 구현하는 파일. 본 문서는 입력과 출력만 기술한다 | 그 외 전부 |
+| 🔓 **계약** | 모듈 간 **데이터 형식**과 **인터페이스**를 정의한다. 바꾸면 연결된 부품을 모두 다시 확인해야 한다 | `core/packets.py`, `core/verdict.py`, `sources/source_api.py`, `detectors/detector_api.py`, `outputs/output_api.py`, `outputs/verdict_api.py`, `link/messages.py`, `link/transport.py` |
+| 🔨 **구현** | 계약을 따르는 구현 파일. 본 문서는 입력과 출력만 기술한다 | 그 외 전부 |
 
 모든 부품은 계약(🔓)을 통해서만 상호작용한다. 따라서 개별 구현 내용을 몰라도 전체 흐름을 파악할 수 있다.
 
@@ -44,6 +44,33 @@ flowchart LR
 - **SafetyFSM**은 두 결과를 종합하여 최종 판단을 내린다. 카메라 이상이 감지되면 검출 결과와 관계없이 Y를 출력하지 않는다.
 - **Output**은 `Decision`만 입력받으며, 사용된 모델이나 카메라 종류에 의존하지 않는다.
 
+### 1.1.1 보드 3대의 데이터 흐름 (다중 보드)
+
+위 흐름이 카메라 노드(A·B) 하나다. 설정에 `link:`가 있으면 노드는 판단을 C에 보고하고, C는 두 노드의 보고를 모아 최종 판정을 낸다. (DESIGN.md §7.4)
+
+```mermaid
+flowchart LR
+    subgraph NODE["RPi A · B (각각)"]
+        FSM2["⚖️ SafetyFSM"] -- "Decision" --> CT["✅ ConfirmTracker<br/>safety/confirm.py"]
+        NL["🔗 NodeLink<br/>link/node.py"]
+    end
+    subgraph HUB["RPi C"]
+        PT["PeerTracker<br/>link/peer.py"] --> AG["🧮 Aggregator<br/>safety/aggregator.py"]
+        AG -- "Verdict" --> VO["📺 VerdictOutput<br/>outputs/verdict_api.py"]
+    end
+    FSM2 -- "Decision" --> NL
+    CT -- "ConfirmStatus" --> NL
+    NL -- "Report (UDP JSON)" --> PT
+    AG -- "Control: confirm_id (UDP JSON)" --> NL
+    NL -- "ConfirmRequest" --> CT
+    VO --> DISP["디스플레이"]
+    VO --> ESP["ESP32 → LED"]
+```
+
+- **노드(A·B):** FSM은 그대로다. `ConfirmTracker`가 FSM이 낸 `Decision`을 보고, C가 확인을 요청한 **뒤에** 찍은 프레임만으로 비었음을 다시 확인한다.
+- **C:** `PeerTracker`가 노드별 최신 유효 보고를 유지하고(중복·지연·재시작·무응답 처리), `Aggregator`가 4가지 판정(`EMPTY` / `OCCUPIED` / `CHECKING` / `UNKNOWN`)을 낸다.
+- **양방향 모두 200 ms마다 상태를 보낸다.** 명령과 ACK가 없으므로 메시지가 유실·중복돼도 다음 주기에 같은 상태가 다시 온다.
+
 ### 1.2 파일 의존 관계
 
 화살표는 import 방향을 나타낸다. 하위 계층은 상위 계층을 참조하지 않으며, `core`는 다른 패키지를 import하지 않는다.
@@ -52,17 +79,26 @@ flowchart LR
 flowchart BT
     subgraph L0["① core — 공통 기반"]
         packets["🔓 packets.py<br/>데이터 형식"]
+        verdict["🔓 verdict.py<br/>C 판정 형식"]
         registry["registry.py<br/>이름→클래스 매핑"]
         clock["clock.py<br/>시계"]
         config["config.py<br/>YAML→설정 객체"]
         slot["slot.py<br/>최신 항목 1개 보관"]
     end
 
+    subgraph L0B["①' link 기반 — 보드 간 통신"]
+        lmsg["🔓 link/messages.py<br/>Report · Control"]
+        ltr["🔓 link/transport.py<br/>UDP · Loopback"]
+        lpeer["link/peer.py<br/>PeerTracker"]
+    end
+
     subgraph L1["② 부품 — 상호 독립"]
         sbase["🔓 sources/source_api.py"]
         mbase["🔓 detectors/detector_api.py"]
         obase["🔓 outputs/output_api.py"]
-        fsmpkg["safety/<br/>fsm · roi · health"]
+        vbase["🔓 outputs/verdict_api.py"]
+        fsmpkg["safety/<br/>fsm · roi · health · confirm"]
+        agg["safety/aggregator.py"]
         simpl["sources/<br/>dummy · webcam · video · scenario"]
         mimpl["detectors/<br/>dummy · yolo_onnx"]
         oimpl["outputs/<br/>console · viewer · serial_out · mock_mcu<br/>(+ protocol)"]
@@ -70,10 +106,12 @@ flowchart BT
 
     subgraph L2["③ 조립"]
         app["app.py<br/>build() → Components"]
+        lnode["link/node.py<br/>NodeLink"]
     end
 
     subgraph L3["④ 실행"]
         runners["runners.py<br/>SyncRunner · ThreadedRunner"]
+        hub["hub.py<br/>Hub · HubRunner"]
     end
 
     subgraph L4["⑤ 진입점"]
@@ -84,22 +122,28 @@ flowchart BT
     sbase --> packets & registry & clock
     mbase --> packets & registry
     obase --> packets & registry
+    vbase --> verdict & obase
     fsmpkg --> packets & config
+    agg --> verdict & lmsg & lpeer
+    lpeer --> lmsg
     simpl --> sbase
     mimpl --> mbase
     oimpl --> obase
 
-    app --> config & clock & sbase & mbase & obase & fsmpkg
-    runners --> app & slot & packets
-    main --> app & runners & scheck
+    lnode --> lmsg & lpeer & ltr & fsmpkg
+    app --> config & clock & sbase & mbase & obase & fsmpkg & lnode & ltr
+    runners --> app & slot & packets & fsmpkg
+    hub --> config & lmsg & lpeer & ltr & agg & vbase
+    main --> app & runners & scheck & hub
     scheck --> app & runners
 ```
 
 구조상 특징:
 
-1. `sources` · `models` · `outputs` · `fsm`은 서로 import하지 않는다. 한 부품의 변경이 다른 부품에 영향을 주지 않는다.
-2. 구체 클래스(웹캠, YOLO 등)를 직접 참조하는 코드는 없다. `app.py`도 레지스트리(`SOURCES`, `DETECTORS`, `OUTPUTS`)만 참조하며, 구체 클래스는 YAML 설정의 이름으로만 지정된다. (§3.2)
-3. `runners.py`는 `Components` 객체만 입력받으며, 부품의 구현 종류(가상/실제)와 무관하게 동작한다.
+1. `sources` · `detectors` · `outputs` · `safety`는 서로 import하지 않는다. 한 부품의 변경이 다른 부품에 영향을 주지 않는다. (예외: `outputs/viewer.py`가 ROI를 그리려고 `safety/roi.py`를 쓴다.)
+2. `link/`의 기반 파일(`messages`, `transport`, `peer`)은 `core`만 참조한다. 부품(`safety/aggregator.py`)과 조립 파일(`link/node.py`, `hub.py`)이 이것을 쓴다. `link/node.py`는 `safety/confirm.py`의 타입을 쓰므로 조립 계층에 둔다.
+3. 구체 클래스(웹캠, YOLO 등)를 직접 참조하는 코드는 없다. `app.py`·`hub.py`도 레지스트리(`SOURCES`, `DETECTORS`, `OUTPUTS`, `VERDICT_OUTPUTS`)만 참조하며, 구체 클래스는 YAML 설정의 이름으로만 지정된다. (§3.2)
+4. `runners.py`는 `Components` 객체만 입력받으며, 부품의 구현 종류(가상/실제)와 무관하게 동작한다.
 
 ### 1.3 디렉터리 구성
 
@@ -108,12 +152,15 @@ src/psafe/
 ├── __main__.py          ⑤ 진입점. 인자 해석 → 조립 → 실행
 ├── scenario_check.py    ⑤ 시나리오 실행 및 expect 검증
 ├── app.py               ③ 설정으로부터 부품 생성, Components로 묶음
-├── runners.py           ④ 부품 실행 루프 (Sync / Threaded)
+├── runners.py           ④ 부품 실행 루프 (Sync / Threaded) — 카메라 노드
+├── hub.py               ④ C(허브) 실행: Hub(수신·왕복 시간·판정·Control 송신), HubRunner
+├── sim.py               ④ 다중 보드 통합 시뮬레이션 (MultiSim, 안전 불변식 check_invariant)
 │
 ├── core/                ① 공통 기반
-│   ├── packets.py   🔓  FramePacket · Detection(s) · Decision · State
+│   ├── packets.py   🔓  FramePacket · Detection(s) · Decision(+count) · State
+│   ├── verdict.py   🔓  Verdict · NodeView · VerdictKind (C 판정), to_protocol (→ ESP32)
 │   ├── registry.py      이름 → 클래스 매핑
-│   ├── config.py        YAML → AppConfig (정의되지 않은 키는 오류)
+│   ├── config.py        YAML → AppConfig(+link) / HubAppConfig (정의되지 않은 키는 오류)
 │   ├── clock.py         RealClock / FakeClock
 │   └── slot.py          LatestSlot (스레드 간 최신 프레임 전달)
 │
@@ -132,15 +179,24 @@ src/psafe/
 ├── safety/              ② 판단 (순수 로직, 입출력 없음)
 │   ├── fsm.py           SafetyFSM: step(FrameDetections) → Decision
 │   ├── roi.py           감시 구역 포함 판정
-│   └── health.py        카메라 상태 검사: check(FramePacket) → 사유 또는 None
+│   ├── health.py        카메라 상태 검사: check(FramePacket) → 사유 또는 None
+│   ├── confirm.py       A·B: ConfirmTracker.step(요청, Decision) → ConfirmStatus
+│   └── aggregator.py    C: Aggregator.step(노드별 최신 Report, now) → Verdict
 │
-├── outputs/             ② 결과 출력            send(Decision)
-│   ├── output_api.py 🔓 Output 인터페이스, OUTPUTS 레지스트리
+├── outputs/             ② 결과 출력            send(Decision) / show(Verdict)
+│   ├── output_api.py 🔓 Output 인터페이스, OUTPUTS 레지스트리 (노드)
+│   ├── verdict_api.py 🔓 VerdictOutput 인터페이스, VERDICT_OUTPUTS (C: console, decision 브리지)
 │   ├── console.py       로그 출력
 │   ├── viewer.py        화면 표시 및 녹화
 │   ├── protocol.py      RPi → ESP32 패킷 v1 (인코딩, CRC-8, 수신 로직)
 │   ├── serial_out.py    USB 시리얼로 ESP32에 송신
 │   └── mock_mcu.py      가짜 ESP32 (같은 수신 로직)
+│
+├── link/                ①'·③ 보드 간 통신 (UDP + JSON)
+│   ├── messages.py  🔓  Report · Control, encode / decode (v2: CRC 꼬리, 왕복 시간 echo, 검증 규칙)
+│   ├── transport.py 🔓  Transport 인터페이스, UdpTransport, LoopbackNetwork(고장 주입)
+│   ├── peer.py          PeerTracker: 노드별 중복·지연·재시작·무응답 판정
+│   └── node.py          NodeLink: A·B 쪽 (Control 수신, Report 송신)
 │
 └── tools/
     ├── camcheck.py      카메라 측정 도구 (파이프라인과 독립)
@@ -160,7 +216,9 @@ firmware/esp32/psafe_gate/psafe_gate.ino   ESP32 펌웨어 (Arduino)
 flowchart TD
     A["<code>python -m psafe --config X.yaml</code>"] --> B["__main__.py<br/>main()"]
     B --> C{"--scenario 지정 여부"}
-    C -- "미지정" --> D["core/config.py<br/>load_config(X.yaml)<br/>→ AppConfig"]
+    C -- "미지정" --> HQ{"X.yaml에<br/>hub: 절?"}
+    HQ -- "있음 (C)" --> HB["hub.py<br/>build_hub() → HubRunner.run()"]
+    HQ -- "없음 (노드)" --> D["core/config.py<br/>parse_config()<br/>→ AppConfig"]
     C -- "지정" --> S["scenario_check.py<br/>run_scenario()<br/>(시나리오를 설정에 병합)"]
     S --> D
     D --> E["app.py<br/>build(cfg)<br/>→ Components"]
@@ -172,7 +230,7 @@ flowchart TD
     S -. "RunResult로<br/>expect 검증" .-> R["PASS / FAIL"]
 ```
 
-실행 경로는 입력 종류(웹캠, 시나리오, 테스트)와 관계없이 **설정 로드 → 조립(`build`) → 실행(Runner)** 의 3단계로 동일하다.
+실행 경로는 입력 종류(웹캠, 시나리오, 테스트)와 관계없이 **설정 로드 → 조립(`build`) → 실행(Runner)** 의 3단계로 동일하다. C(허브)도 같은 3단계이며, 조립은 `build_hub()`, 실행은 `HubRunner`다 (§4.4).
 
 ### 2.2 `Components`
 
@@ -186,7 +244,9 @@ Components
 ├── detector  : Detector         🔓 detectors/detector_api.py
 ├── health    : HealthMonitor    safety/health.py
 ├── fsm       : SafetyFSM        safety/fsm.py
-└── outputs   : list[Output]     🔓 outputs/output_api.py (복수 가능)
+├── outputs   : list[Output]     🔓 outputs/output_api.py (복수 가능)
+├── link      : NodeLink | None  link/node.py           (설정에 link:가 있을 때만)
+└── confirm   : ConfirmTracker | None  safety/confirm.py (link와 항상 함께)
 ```
 
 ---
@@ -236,7 +296,9 @@ sequenceDiagram
 | `source.name` | `SOURCES` (`sources/source_api.py`) | `dummy`, `webcam`, `video` |
 | `model.name` | `DETECTORS` (`detectors/detector_api.py`) | `dummy`, `yolo_onnx` |
 | `outputs[].name` | `OUTPUTS` (`outputs/output_api.py`) | `console`, `viewer`, `serial`, `mock_mcu` |
-| `fsm`, `health`, `runner` | 해당 없음 (고정 클래스) | `core/config.py`의 `FsmConfig` 등 |
+| C 설정의 `outputs[].name` | `VERDICT_OUTPUTS` (`outputs/verdict_api.py`) | `console`, `decision` (기존 Output을 감쌈. 예: `output: serial`) |
+| `fsm`, `health`, `runner`, `link` | 해당 없음 (고정 클래스) | `core/config.py`의 `FsmConfig`, `LinkConfig` 등 |
+| C 설정의 `hub` | 해당 없음 (고정 클래스) | `core/config.py`의 `HubConfig` |
 
 ### 3.3 의존성 주입
 
@@ -326,15 +388,22 @@ flowchart LR
         sup["스레드 감시<br/>Ctrl+C · GUI(poll)"]
     end
 
+    subgraph T4["T4 link-rx (link: 있을 때)"]
+        lr["C의 Control 수신<br/>→ 현재 확인 요청"]
+    end
+
     slot[("LatestSlot<br/>최신 프레임")]
-    board[("DecisionBoard<br/>최신 판단")]
-    outs["Outputs<br/>(예정: ESP32)"]
+    board[("DecisionBoard<br/>최신 판단 + 확인 상태")]
+    outs["Outputs<br/>(콘솔 · ESP32 등)"]
+    hubc["C (Report)"]
 
     r -- "put()" --> slot
     slot -- "get()" --> p
-    p -- "publish()" --> board
-    board -- "latest()" --> h
+    lr -. "request()" .-> p
+    p -- "publish(판단, 확인 상태)" --> board
+    board -- "snapshot()" --> h
     h -- "send()" --> outs
+    h -. "send_report()" .-> hubc
 ```
 
 | 스레드 | 역할 | 이상 발생 시 |
@@ -342,9 +411,26 @@ flowchart LR
 | T1 capture | 카메라 프레임을 `LatestSlot`에 덮어쓴다 | 프레임 중단 → T2 대기 시간 초과 → N |
 | T2 worker | 최신 프레임을 판단하여 `DecisionBoard`에 게시한다 | 처리 지연 → 판단이 오래됨 → T3가 N 송신 |
 | T3 heartbeat | 판단 변경 여부와 무관하게 주기적으로 송신한다 | 송신 중단 → ESP32 워치독이 N 처리 |
+| T4 link-rx | (다중 보드) C의 Control을 받아 현재 확인 요청을 갱신한다 | C 무응답 → 확인 요청 없음 → 확인 초기화. 이 노드의 자체 출력은 영향 없음 |
 | main | 작업 스레드 생존을 감시한다 | 스레드 종료 감지 → 전체 종료, 마지막으로 N 송신 |
 
 **LatestSlot을 사용하는 이유:** 일반 큐를 사용하면 모델 처리 속도가 카메라보다 느릴 때 프레임이 누적되어 과거 영상을 기준으로 판단하게 된다. LatestSlot은 크기 1의 버퍼에 항상 최신 프레임을 덮어쓰고, 처리되지 않은 이전 프레임은 폐기한다. (DESIGN.md §3.2)
+
+**판단과 확인 상태를 한 쌍으로 게시하는 이유:** 따로 읽으면 "새 판단 + 옛 확인 결과"가 섞여 C에 보고될 수 있다. heartbeat가 판단을 `decision_stale` N으로 바꿔 보낼 때는 확인 결과도 `fault`로 바꾼다 (worker가 멈춘 동안 `empty`를 계속 echo하면 안 된다).
+
+SyncRunner도 `link:`가 있으면 프레임마다 도착한 Control을 모두 반영하고, 판단마다 Report를 보낸다 (판단 1개 = 하트비트 1회로 본다).
+
+### 4.4 HubRunner (C)
+
+카메라·모델 없이 A·B의 Report를 모아 판정한다. (`hub.py`, DESIGN.md §7.4.6)
+
+| 스레드 | 역할 | 이상 발생 시 |
+|---|---|---|
+| hub-rx | Report 수신 → decode → `PeerTracker` | 깨진·중복·지난 boot의 메시지는 무시하고 센다 |
+| heartbeat | 200 ms마다 `Aggregator.step` → 모든 `VerdictOutput.show` → 각 노드에 Control 송신 | 송신 중단 → ESP32 워치독이 LED N, 노드는 C 무응답으로 확인 초기화 |
+| main | 스레드 감시, Ctrl+C, 출력의 `poll()`, 상태 로그 | 종료 시 출력에 `UNKNOWN(shutdown)`, 노드에 `confirm_id` 없는 Control |
+
+`Hub.poll()`(수신 1개)과 `Hub.tick()`(판정 1회)은 함수로 분리되어 있어, 테스트에서 FakeClock + `LoopbackNetwork`로 스레드 없이 돌릴 수 있다.
 
 ---
 
@@ -358,7 +444,8 @@ flowchart TD
     S3["3 · 실행 루프<br/>runners.py: process_frame → SyncRunner"] --> S4
     S4["4 · 판단<br/>DESIGN.md §8 → safety/"] --> S5
     S5["5 · 실시간 처리<br/>ThreadedRunner, core/slot.py, core/clock.py"] --> S6
-    S6["6 · 담당 구현체"]
+    S6["6 · 담당 구현체"] --> S7
+    S7["7 · 다중 보드<br/>DESIGN.md §7.4 → link/messages.py → safety/confirm.py → safety/aggregator.py → hub.py"]
 ```
 
 ### 0. 실행 확인
@@ -376,6 +463,7 @@ flowchart TD
 - `sources/source_api.py`, `detectors/detector_api.py`, `outputs/output_api.py`: 부품별 인터페이스. `@abstractmethod`가 필수 구현 메서드다.
 - `FramePacket`과 `FrameDetections`의 `seq`, `timestamp`는 FSM이 오래되거나 순서가 뒤바뀐 프레임을 거부하는 데 사용된다.
 - `Output`의 `send()`는 하트비트마다 호출되고, `on_frame()`은 프레임 처리마다 호출된다.
+- `Decision.count`는 ROI 안 사람 수다 (`OCCUPIED`일 때만 > 0). C에 보고할 때 쓴다.
 
 ### 2. 조립
 
@@ -414,6 +502,14 @@ flowchart TD
 2. `--scenario "scenarios/*.yaml" --check`로 전체 시나리오를 검증한다.
 3. 안전 불변식("실제로 사람이 있는데 Y" 0회)이 유지되는지 확인한다. `scenario_check.py`가 자동으로 검사한다.
 
+### 7. 다중 보드
+
+1. DESIGN.md §7.4.2~7.4.6: 왜 UDP인지, 시계 규칙, 메시지, 확인(CONFIRM) 규칙, 판정 우선순위.
+2. `link/messages.py`: 메시지 형식과 검증 규칙. 잘못된 메시지는 만들 수도 받을 수도 없다.
+3. `link/peer.py`: ESP32 `Receiver`(`outputs/protocol.py`)와 같은 역할의 네트워크판.
+4. `safety/confirm.py`, `safety/aggregator.py`: 순수 로직. 상단 docstring의 상태도를 먼저 본다.
+5. `hub.py`와 `tests/test_hub.py`의 `test_three_processes_worth_of_components_over_real_udp`: 전체가 이어지는 모습.
+
 ---
 
 ## 6. 주제별 참조
@@ -431,6 +527,13 @@ flowchart TD
 | 시간 추상화 | `core/clock.py`, §3.4 |
 | 시나리오 검증 | `scenario_check.py`, `scenarios/*.yaml`의 `expect` |
 | 설정 오류 처리 | `core/config.py` (정의되지 않은 키는 오류로 처리) |
+| 보드 간 메시지 형식·검증 규칙 | 🔓 `link/messages.py`, DESIGN.md §7.4.4 |
+| C가 "판단 불가"를 내는 원인 | 로그의 `reason` 값(`A_timeout`, `B_stale`, `confirm_timeout` 등), `safety/aggregator.py`, §9.8 |
+| 확인(CONFIRM)이 끝나지 않는 원인 | `safety/confirm.py`(요청 이후 프레임만 셈), `link.confirm_frames`, `hub.confirm_timeout_s` |
+| 새 디스플레이 추가 | 🔓 `outputs/verdict_api.py`의 `VerdictOutput` 상속 → `@VERDICT_OUTPUTS.register` → C 설정 `outputs`에 이름 지정. 표시 규칙 5개는 같은 파일 docstring |
+| 네트워크 고장 흉내 | `link/transport.py`의 `LoopbackNetwork` (`set_fault`, `cut`, `heal`) |
+| A·B·C를 한 프로세스에서 시험 | `sim.py`의 `MultiSim` (노드마다 다른 시계, `at()`으로 단절·재시작 예약), `check_invariant` |
+| PC 한 대에서 A·B·C 실행 | `config/hub_c.yaml`, `node_a.yaml`, `node_b.yaml` (README §5.2) |
 
 ---
 
@@ -448,6 +551,11 @@ flowchart TD
 | 파이프라인 전체 | `tests/test_pipeline_smoke.py` |
 | 시나리오 | `tests/test_scenarios.py`, `scenarios/*.yaml` |
 | 실시간 스레드 | `tests/test_threaded.py` (`-m slow`) |
+| 보드 간 메시지·전송·수신 추적 | `tests/test_link.py` (깨진 바이트, 고장 주입, localhost UDP) |
+| A·B 확인 처리, `Decision.count`, 노드 Runner 연결 | `tests/test_confirm.py` |
+| C 판정, ESP32 매핑, 출력 | `tests/test_aggregator.py` |
+| C 실행, 설정, A·B·C 실제 UDP 연결 | `tests/test_hub.py` |
+| 다중 보드 통합 시뮬레이션 (시계 어긋남, 네트워크 고장, 재시작, 무작위 30종) | `tests/test_multisim.py` |
 
 ```powershell
 .venv\Scripts\python -m pytest -q          # 기본 테스트
@@ -508,6 +616,17 @@ flowchart TD
 
 모든 시각은 주입된 Clock 기준이며, 프레임 나이는 `now - timestamp`로 계산한다.
 
+**보드 간에는 시각을 비교하지 않는다** (파이마다 시계가 다르다. DESIGN.md §7.4.3).
+
+| 이름 | 누구의 시계 | 의미 |
+|---|---|---|
+| `Report.evidence_age_ms` | 보내는 노드 | 보낼 때 기준, 판단 근거 프레임이 몇 ms 전 것인가 |
+| `Received.received_at` | 받는 쪽 | 메시지를 받은 시각 (`link/peer.py`) |
+| `Report.echo_hold_ms` | 보내는 노드 (길이) | 마지막 Control을 받은 뒤 이 Report를 보낼 때까지 |
+| `Received.transit_s` | 받는 쪽 (C) | 전달 시간 상한 = 왕복 시간 = (받은 시각 − echo한 Control 보낸 시각) − `echo_hold_ms` |
+| `NodeView.evidence_age_ms` | C | `evidence_age_ms + 왕복 시간 + (C의 now − received_at)`. 왕복 시간을 모르면 `None` |
+| `ConfirmRequest.since` | 노드 | 이 확인 요청을 **처음** 받은 시각. 이보다 늦게 찍은 프레임만 확인에 쓴다 |
+
 ### 9.4 시간 제한 설정
 
 | 설정 | 의미 | 사용처 |
@@ -516,6 +635,11 @@ flowchart TD
 | `runner.max_decision_age_ms` | heartbeat가 보낼 판단의 유효 기간. 초과 시 `decision_stale` | `runners.py` (heartbeat) |
 | `runner.heartbeat_ms` | 판단 송신 주기 | `runners.py` (heartbeat) |
 | (ESP32) 500 ms | 유효 패킷 수신 한도. 초과 시 ESP32가 강제 N | 펌웨어 (DESIGN §7.3) |
+| `link.node_timeout_ms` | 노드: C가 이 시간 동안 조용하면 확인 요청을 버린다 | `link/node.py` |
+| `hub.node_timeout_ms` | C: 노드가 이 시간 동안 조용하면 무응답(`*_timeout`) | `hub.py`, `link/peer.py` |
+| `hub.max_evidence_age_ms` | C: CLEAR인데 근거 나이가 이보다 크면 `*_stale` | `safety/aggregator.py` |
+| `hub.confirm_timeout_s` | C: 확인이 이 시간 안에 안 끝나면 `confirm_timeout` | `safety/aggregator.py` |
+| `hub.heartbeat_ms` | C의 판정·Control 송신 주기 | `hub.py` |
 
 ### 9.5 버려진 프레임 카운터 (`RunResult`, `DummySource`)
 
@@ -548,3 +672,21 @@ flowchart TD
 | `scenario_check.py` | 시나리오 실행 및 `expect` 검증 |
 | `src/psafe/detectors/` | 검출기 코드 |
 | `models/` (저장소 루트) | ONNX 모델 파일 (git 제외) |
+| `Decision` / `Verdict` | 노드 하나의 판단 (Y/N) / C의 최종 판정 (4가지) |
+| `Output` / `VerdictOutput` | 노드의 출력 (`send(Decision)`) / C의 출력 (`show(Verdict)`) |
+| `Report` / `Control` | A·B → C 보고 / C → A·B 확인 번호 |
+| `ConfirmRequest` / `ConfirmStatus` | 노드가 받은 확인 요청 / 그 요청에 대한 노드의 답 |
+| `boot` / `seq` | 프로세스 시작마다 바뀌는 값(재시작 구분) / 송신마다 1씩 증가 |
+
+### 9.8 C의 판정과 `reason`
+
+| `Verdict.kind` | 화면 | `reason` 예 | ESP32 (STATE / SAFE) |
+|---|---|---|---|
+| `OCCUPIED` | 사람 있음 | `person_A`, `person_B` | `OCCUPIED` / N |
+| `UNKNOWN` | 판단 불가 | `A_timeout`(무응답), `A_fault`, `A_init`, `A_no_rtt`(왕복 시간 모름), `A_stale`(근거 오래됨, 왕복 시간 포함), `confirm_fault_B`, `confirm_timeout`, `shutdown` | `FAULT` / N |
+| `CHECKING` | 확인 중 | `A_verifying`(노드 FSM 확인 중), `confirming`(확인 요청 진행 중) | `VERIFYING` / N |
+| `EMPTY` | 비었음 확인 | `confirmed` | `CLEAR` / **Y** |
+
+우선순위는 위에서부터다. `OCCUPIED`가 `UNKNOWN`보다 위인 이유는 DESIGN.md §7.4.6.
+
+확인 응답(`Report.confirm`) 값: `None`(요청 없음) / `pending`(확인 중) / `empty` / `occupied` / `fault`. `occupied`와 `fault`는 그 `confirm_id` 동안 유지된다.

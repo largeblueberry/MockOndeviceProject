@@ -31,6 +31,7 @@ M = TypeVar("M", Report, Control)
 class Received(Generic[M]):
     msg: M
     received_at: float             # 받는 쪽 Clock 기준
+    transit_s: float | None = None  # 보내는 쪽 -> 받는 쪽 전달 시간의 상한 (왕복 시간). 모르면 None
 
 
 @dataclass
@@ -53,22 +54,23 @@ class PeerTracker(Generic[M]):
         self._peers: dict[str, _Peer[M]] = {}
         self.counts = {"ok": 0, "restart": 0, "dup": 0, "old_boot": 0, "unknown_node": 0}
 
-    def feed(self, msg: M, now: float) -> str:
+    def feed(self, msg: M, now: float, transit_s: float | None = None) -> str:
         """메시지 1개를 처리한다. 결과: ok | restart | dup | old_boot | unknown_node.
-        ok와 restart만 받아들여진 것이다."""
+        ok와 restart만 받아들여진 것이다. transit_s는 받은 쪽이 계산한 전달 시간 상한 (hub.py)."""
         r = self._classify(msg)
         self.counts[r] += 1
         if r == "ok":
             p = self._peers[msg.node]
-            p.seq, p.last = msg.seq, Received(msg, now)
+            p.seq, p.last = msg.seq, Received(msg, now, transit_s)
         elif r == "restart":
             p = self._peers.get(msg.node)
             if p is None:
-                self._peers[msg.node] = _Peer(msg.boot, msg.seq, Received(msg, now), deque(maxlen=RETIRED_BOOTS))
+                self._peers[msg.node] = _Peer(msg.boot, msg.seq, Received(msg, now, transit_s),
+                                              deque(maxlen=RETIRED_BOOTS))
             else:
                 log.info("node %s restarted (boot %s -> %s)", msg.node, p.boot, msg.boot)
                 p.retired.append(p.boot)
-                p.boot, p.seq, p.last = msg.boot, msg.seq, Received(msg, now)
+                p.boot, p.seq, p.last = msg.boot, msg.seq, Received(msg, now, transit_s)
         return r
 
     def _classify(self, msg: M) -> str:

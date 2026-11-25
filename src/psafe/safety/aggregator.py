@@ -101,15 +101,22 @@ class Aggregator:
         if rec is None:
             return NodeView(node, False, None, 0, "timeout", None, None)
         r = rec.msg
-        age = None if r.evidence_age_ms is None else r.evidence_age_ms + (now - rec.received_at) * 1000.0
+        # 근거 나이 = 노드가 잰 나이 + 전달 시간 상한(왕복 시간) + C가 받은 뒤 지난 시간 (E-21).
+        # 전달 시간을 모르면 근거 나이도 모른다.
+        transit_ms = None if rec.transit_s is None else rec.transit_s * 1000.0
+        age = None
+        if r.evidence_age_ms is not None and transit_ms is not None:
+            age = r.evidence_age_ms + transit_ms + (now - rec.received_at) * 1000.0
         confirm = r.confirm if self._confirm_id is not None and r.confirm_id == self._confirm_id else None
-        return NodeView(node, True, r.state, r.count, r.reason, age, confirm)
+        return NodeView(node, True, r.state, r.count, r.reason, age, confirm, transit_ms)
 
     def _unknown_reason(self, v: NodeView) -> str | None:
         if not v.alive:
             return f"{v.node}_timeout"
         if v.state in (State.FAULT, State.INIT):
             return f"{v.node}_{v.state.value.lower()}"
+        if v.state == State.CLEAR and v.transit_ms is None:
+            return f"{v.node}_no_rtt"             # 왕복 시간을 몰라서 근거 나이를 알 수 없음
         if v.state == State.CLEAR and (v.evidence_age_ms is None or v.evidence_age_ms > self.max_evidence_age_ms):
             return f"{v.node}_stale"
         return None
@@ -119,18 +126,3 @@ class Aggregator:
 
     def _verdict(self, kind: VerdictKind, reason: str, views: tuple[NodeView, ...], now: float) -> Verdict:
         return Verdict(kind, reason, views, self._confirm_id, now)
-
-
-# ---- ESP32 연결 (§7.4.6 매핑) ------------------------------------------------
-
-VERDICT_STATES: dict[VerdictKind, State] = {
-    VerdictKind.EMPTY: State.CLEAR,
-    VerdictKind.OCCUPIED: State.OCCUPIED,
-    VerdictKind.CHECKING: State.VERIFYING,
-    VerdictKind.UNKNOWN: State.FAULT,
-}
-
-
-def to_protocol(v: Verdict) -> tuple[State, bool]:
-    """Verdict -> ESP32 프로토콜 v1의 (STATE, SAFE). Y는 EMPTY일 때만."""
-    return VERDICT_STATES[v.kind], v.kind == VerdictKind.EMPTY
