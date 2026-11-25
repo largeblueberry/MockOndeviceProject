@@ -133,3 +133,50 @@ def test_fake_clock_rejected():
 def test_scenario_threaded(path):
     report = run_scenario(path, mode="threaded")
     assert report.passed, report.summary()
+
+
+class StuckInvokeDetector(Detector):
+    """Coral invoke()가 USB 문제로 돌아오지 않는 상황. 몇 번 정상 동작한 뒤 영원히 멈춘다."""
+    name = "hang"
+
+    def __init__(self, ok_frames=3):
+        self.ok_frames = ok_frames
+        self.release = threading.Event()
+
+    def predict(self, pkt):
+        from psafe.core.packets import FrameDetections
+        if self.ok_frames > 0:
+            self.ok_frames -= 1
+            return FrameDetections(pkt.seq, pkt.timestamp, (), self.name, 0.0)
+        self.release.wait()          # 테스트 끝에 풀어 준다 (스레드 정리용)
+        raise RuntimeError("released")
+
+
+def test_fatal_stale_stops_run_when_worker_hangs():
+    c, rec = make(seconds=10.0, fatal_stale_s=1.0)
+    det = c.detector = StuckInvokeDetector()
+    t0 = time.monotonic()
+    try:
+        r = ThreadedRunner(c).run()
+    finally:
+        det.release.set()
+    assert "worker stalled" in (r.error or "")          # 종료 코드 1 -> systemd 재시작
+    assert time.monotonic() - t0 < 4.0                  # 10초를 다 돌지 않음
+    assert "decision_stale" in {d.reason for _, d in rec.sent}   # 멈춘 동안에도 N은 계속 나갔다
+    assert not any(d.safe for _, d in rec.sent)
+    assert rec.sent[-1][1].reason == "shutdown"
+
+
+def test_fatal_stale_does_not_fire_while_detector_keeps_failing():
+    # 고장이어도 worker가 매번 새 FAULT 판단을 내면 '멈춤'이 아니다 -> 재시작 루프 없음
+    c, rec = make(seconds=2.0, fatal_stale_s=1.0)
+    c.detector = CrashingDetector()
+    r = ThreadedRunner(c).run()
+    assert r.error is None
+    assert {d.reason for _, d in rec.sent} >= {"detector_error"}
+
+
+def test_fatal_stale_must_exceed_decision_age():
+    from psafe.core.config import ConfigError
+    with pytest.raises(ConfigError, match="fatal_stale_s"):
+        make(fatal_stale_s=0.5)                          # max_decision_age_ms 600 이하

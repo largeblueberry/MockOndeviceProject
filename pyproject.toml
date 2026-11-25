@@ -16,6 +16,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest"]
 onnx = ["onnxruntime"]
+# Coral / TFLite 실행기. 환경마다 구할 수 있는 패키지가 달라 둘로 나눈다 (docs/edge_tpu/DISCUSSION.md R3 짝 ②)
+#   Pi (Python <= 3.12): pip install -e .[tflite] -c requirements/tpu-py312.txt
+#   최신 Python / Windows: pip install -e .[litert]   (Edge TPU delegate 호환은 미검증)
+tflite = ["tflite-runtime"]
+litert = ["ai-edge-litert"]
 serial = ["pyserial"]
 
 [tool.setuptools.packages.find]
