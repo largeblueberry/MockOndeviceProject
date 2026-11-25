@@ -1,0 +1,10 @@
+# Coral 노드 constraints (Python 3.12, Debian 13 A안). ⚠️ 아직 실기 미검증.
+#   pip install -e .[tflite] -c requirements/tpu-py312.txt
+#
+# libedgetpu(.deb, pip 밖)와 tflite-runtime은 같은 TF 버전의 짝이어야 한다 (DISCUSSION.md R3 짝 ①):
+#   libedgetpu1-std 16.0tf2.17.1  <->  tflite-runtime 2.17.1
+# tflite-runtime 2.17.x는 NumPy 1.x로 빌드되어 NumPy 2에서 크래시 -> numpy<2 (연구 문서 §4.1)
+# OpenCV 상한은 손으로 정하지 않는다: numpy<2로 설치한 뒤 resolver가 고른 버전을 테스트하고 여기 고정 (R4-1)
+
+tflite-runtime==2.17.1
+numpy<2

@@ -242,6 +242,7 @@ class ThreadedRunner:
                   판단 또는 Y의 근거 프레임이 max_decision_age_ms보다 오래되면 -> N
                   (멈춘 worker를 잡아냄, expire_decision 참고)
     main          감독: 지표 기록, 스레드 생존 확인, Ctrl+C, 스트림 종료
+                  fatal_stale_s 동안 새 판단이 없으면 (worker가 호출 안에서 멈춤) 오류로 종료
 
     어떤 스레드든 죽으면 result.error를 설정하고 실행을 멈춘다. Output에 마지막으로
     보내는 신호는 항상 N("shutdown")이다. 실제 운용에서는 프로세스 관리자
@@ -260,6 +261,7 @@ class ThreadedRunner:
         self.period_s = rc.heartbeat_ms / 1000.0
         self.metrics_interval_s = rc.metrics_interval_s
         self.max_decision_age_s = rc.max_decision_age_ms / 1000.0
+        self.fatal_stale_s = rc.fatal_stale_s
         # 프레임 대기 한도 = 프레임 유효 기간 (core/config.py FsmConfig.max_frame_age_ms 참고)
         self.frame_timeout_s = c.cfg.fsm.max_frame_age_ms / 1000.0
 
@@ -342,6 +344,10 @@ class ThreadedRunner:
             now = c.clock.now()
             if self.max_seconds is not None and now - r.start >= self.max_seconds:
                 return
+            if (stalled := self._stalled_for(now)) is not None:
+                r.error = f"worker stalled: no new decision for {stalled:.1f} s (fatal_stale_s)"
+                log.error("stopping: %s", r.error)
+                return
             if now >= next_metrics:
                 last = self._log_metrics(last, now - next_metrics + self.metrics_interval_s)
                 next_metrics = now + self.metrics_interval_s
@@ -349,6 +355,16 @@ class ThreadedRunner:
                 log.info("stop requested by output")
                 return
             self._stop.wait(0.03)
+
+    def _stalled_for(self, now: float) -> float | None:
+        """판단 '내용'이 아니라 판단 '시각'을 본다. N이 오래 지속되는 것(카메라 고장 등)은 정상 동작이고,
+        worker가 새 판단을 아예 못 내는 것만 멈춤이다 (DISCUSSION.md R2-4)."""
+        if self.fatal_stale_s is None:
+            return None
+        d = self.board.latest()
+        since = d.decided_at if d is not None else self.result.start
+        age = now - since
+        return age if age > self.fatal_stale_s else None
 
     def _log_metrics(self, last: tuple[int, int], interval: float) -> tuple[int, int]:
         cap, proc = self.frame_slot.put_count, self.result.frames

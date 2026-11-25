@@ -52,6 +52,11 @@ class RunnerConfig:
     heartbeat_ms: float = 200.0
     max_decision_age_ms: float = 600.0   # heartbeat가 보낼 판단이 이보다 오래되면 N (worker 멈춤 감지)
     metrics_interval_s: float = 5.0
+    # worker가 이 시간 동안 판단을 하나도 새로 내지 못하면(예: Coral invoke() hang) 실행을 오류로 끝낸다
+    # -> 종료 코드 1 -> systemd가 재시작. 그동안 N은 max_decision_age_ms가 이미 보장한다 (복구용, 안전용 아님).
+    # 카메라 고장·암전 중에는 worker가 매번 새 FAULT 판단을 내므로 발동하지 않는다. None = 끔.
+    # (docs/edge_tpu/DISCUSSION.md R2-4, 합의 11)
+    fatal_stale_s: float | None = None
 
 
 @dataclass
@@ -143,6 +148,10 @@ def parse_config(data: dict[str, Any]) -> AppConfig:
         raise ConfigError(f"config.runner.clock: must be auto|real|fake, got {cfg.runner.clock!r}")
     if len(cfg.fsm.roi) < 3:
         raise ConfigError("config.fsm.roi: polygon needs at least 3 points")
+    fs = cfg.runner.fatal_stale_s
+    if fs is not None and (not isinstance(fs, (int, float)) or fs * 1000 <= cfg.runner.max_decision_age_ms):
+        raise ConfigError("config.runner.fatal_stale_s: must be a number larger than max_decision_age_ms "
+                          f"({cfg.runner.max_decision_age_ms} ms), got {fs!r}")
     if cfg.link is not None:
         _check_link(cfg.link)
     return cfg
