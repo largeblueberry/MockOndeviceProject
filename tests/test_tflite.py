@@ -176,6 +176,7 @@ def test_input_sent_to_engine_is_quantized_nhwc_rgb(tmp_path):
     det.predict(FramePacket(0, 0.0, "t", img))
     x = eng.inputs[-1]
     assert x.shape == (1, S, S, 3) and x.dtype == np.int8
+    assert x.flags["C_CONTIGUOUS"]                       # boxed[:, :, ::-1]의 음수 stride가 엔진으로 새지 않음
     lut = input_lut(IN_INT8)
     assert tuple(x[0, S // 2, S // 2]) == (lut[255], lut[0], lut[0])     # RGB 순서
     assert tuple(x[0, 0, 0]) == (lut[114],) * 3                         # letterbox 여백
@@ -258,6 +259,20 @@ def test_input_size_must_match_manifest(tmp_path):
 def test_output_channels_must_match_names(tmp_path):
     with pytest.raises(ManifestError, match="4 \\+ 1 classes"):
         make(tmp_path, names=["person"]).load()
+
+
+def test_integer_output_without_quantization_is_rejected(tmp_path):
+    eng = FakeTpuEngine(out=TensorSpec((1, 6, N), np.dtype(np.int8)))      # scale 0 -> 역양자화 불가
+    with pytest.raises(ManifestError, match="integer output"):
+        make(tmp_path, engine=eng).load()
+
+
+def test_failed_tensor_check_closes_engine(tmp_path):
+    # engine.load()로 Coral을 연 뒤 검사에서 실패하면 직접 닫아야 한다 (open_all은 아직 close를 등록 전)
+    eng = FakeTpuEngine()
+    with pytest.raises(ManifestError):
+        make(tmp_path, imgsz=640, engine=eng).load()
+    assert eng.loaded and eng.closed
 
 
 def test_newer_build_tf_only_warns(tmp_path, caplog):
@@ -349,6 +364,18 @@ def test_local_engine_reads_specs(monkeypatch):
     assert eng._itp.delegates == [("delegate", "edgetpu.dll")]
     assert eng.input_spec() == TensorSpec((1, S, S, 3), np.dtype(np.int8), 1 / 255, -128)
     assert eng.output_specs()[0].quantized
+
+
+def test_spec_prefers_quantization_parameters_and_rejects_per_channel():
+    base = {"name": "out", "shape": np.array([1, 6, N]), "dtype": np.int8, "quantization": (0.0, 0)}
+    spec = tpu_runtime._spec({**base, "quantization_parameters": {"scales": np.array([0.004]),
+                                                                  "zero_points": np.array([-128])}})
+    assert spec.quantized and spec.scale == pytest.approx(0.004) and spec.zero_point == -128
+    with pytest.raises(ValueError, match="per-channel"):
+        tpu_runtime._spec({**base, "quantization_parameters": {"scales": np.array([0.1, 0.2]),
+                                                               "zero_points": np.array([0, 0])}})
+    legacy = tpu_runtime._spec({**base, "quantization": (0.5, 3)})
+    assert (legacy.scale, legacy.zero_point) == (0.5, 3)
 
 
 def test_local_engine_none_delegate_attaches_nothing(monkeypatch):

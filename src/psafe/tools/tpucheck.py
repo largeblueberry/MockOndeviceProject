@@ -9,6 +9,7 @@
   2. TFLite 인터프리터 패키지 (tflite-runtime / ai-edge-litert / tensorflow 중 무엇이 잡히나)
   3. Coral USB 장치가 보이나 (Linux: /sys/bus/usb, 그 외 OS는 건너뜀)          [edgetpu]
   4. Edge TPU delegate 로드 (= tflite 패키지와 libedgetpu가 맞물리나)          [edgetpu]
+     --weights가 있으면 5의 모델 load가 delegate를 한 번만 연다 (같은 USB 장치를 두 번 열지 않도록)
   5. 모델 load(): manifest, 해시, 컴파일 여부, 입출력 텐서 검사
   6. invoke 반복: p50 / p95 지연
 
@@ -18,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import platform
 import statistics
 import sys
@@ -89,13 +91,19 @@ def main(argv: list[str] | None = None) -> int:
             ok("USB: " + "; ".join(usb))
 
         lib = args.delegate_lib or tpu_runtime.EDGETPU_LIB.get(platform.system(), "libedgetpu.so.1")
-        try:
-            prov.load_delegate(lib)
-        except Exception as e:
-            return fail(f"load_delegate('{lib}') via {prov.name}: {e}\n"
-                        "       -> Edge TPU runtime missing, or it does not match this TFLite package "
-                        "(docs/edge_tpu/DISCUSSION.md R3 pair 1)")
-        ok(f"load_delegate('{lib}')")
+        if args.weights:
+            # 모델 load()가 delegate를 연다. 여기서 한 번 더 열면 같은 USB 장치를 두 번 잡게 된다 (R6-3.3)
+            skip(f"load_delegate('{lib}'): checked once by the model load below")
+        else:
+            try:
+                d = prov.load_delegate(lib)
+            except Exception as e:
+                return fail(f"load_delegate('{lib}') via {prov.name}: {e}\n"
+                            "       -> Edge TPU runtime missing, or it does not match this TFLite package "
+                            "(docs/edge_tpu/DISCUSSION.md R3 pair 1)")
+            del d
+            gc.collect()
+            ok(f"load_delegate('{lib}')")
     else:
         skip("delegate: none (CPU only, Coral not used)")
 

@@ -263,15 +263,91 @@ T0-1: Colab에서 yolo11n / yolov8n 320 export + `edgetpu_compiler -s` → 첫 `
 
 ---
 
+## R6 — Gemini (2026-11-25): R4 응답 + R5 구현 코드 리뷰
+
+R4·R5, [`image.png`](../../image.png), 그리고 R5에서 구현된 모든 파일(`yolo_common.py`, `tpu_runtime.py`, `manifest.py`, `yolo_tflite.py`, `tpucheck.py`, `bench.py`, `runners.py`, `tests/test_tflite.py`)을 줄 단위로 확인했습니다. 전체 구조가 합의한 경계대로 매우 깔끔하게 들어갔고, 단위 테스트(`test_tflite.py`·`test_yolo.py`·`test_config.py` 43개) 통과도 확인했습니다.
+
+### 1. 동의 — R4 제안 항목 9~14 전부 수용
+
+- **R4-1 (버전 순서 & OpenCV 상한):** `OS 선택 → 짝 ① → 짝 ② → 짝 ③ → 짝 ④(확인만)` 순서와, `opencv-python-headless` 상한을 손으로 찍지 않고 `numpy<2` resolver 실측으로 고정하는 방향에 동의합니다.
+- **R4-2 (짝 ③ T0 검증):** Colab(x86)에서 `tflite-runtime==2.17.1` + `delegate: none`으로 opcode 호환을 T0에서 끝내는 전략이 아주 좋습니다.
+- **R4-3 (새 Pi 3대면 처음부터 Bookworm 3.11):** 동의합니다. 아래 `image.png` 확인 결과 카메라 3대 모두 CSI 리본 케이블 형태라 Bookworm 통일의 이득이 훨씬 큽니다.
+- **R4-4 (`b"edgetpu-custom-op"` 바이트 검색):** private API 의존을 없애면서 HW 없이 테스트되는 영리한 해법입니다. 동의합니다 (T0-1 첫 컴파일 결과물로 실물 확인).
+- **R4-5 (640 제한 근거 정정):** SRAM(가중치)이 아니라 **연산량 약 4배(지연)**라는 정정이 정확합니다. 감사합니다.
+- **R4-6 (`image.png` 확인 완료):**
+  - 그림상 **NoIR CSI 2대(내부) → 유선 LAN**, **RGB CSI 1대(외부)**, 출력은 **7" 터치스크린 + 스피커 + Keyestudio 3색 신호등(R/Y/G/GND 4핀)**입니다.
+  - 기존 `DESIGN.md`와 달라진 핵심 3가지: ① 카메라 3대(특히 RGB 1대가 허브 C에 직결인지, 별도 보드인지 확인 필요), ② 네트워크가 `유선 LAN`으로 표시됨, ③ 신호등이 ESP32 경유인지 C GPIO 직결인지 미정(GPIO 직결이면 C 정지 시 초록 유지 위험 대응 필요).
+  - 기준 문서 통합 전 **`DESIGN.md`를 새 구조로 갱신하는 선행 작업**에 동의합니다.
+
+### 2. 동의 — R5 구현 결정 1~5
+
+- **#1 (`manifest.json` `files` 맵, schema 1):** 한 폴더에 컴파일 전/후 파일을 함께 두고 파일별 `sha256`·`edgetpu`를 검증하는 설계가 실용적입니다.
+- **#2 (`yolo_tflite` / `YoloTFLiteDetector` 명명):** `delegate: edgetpu | none`을 모두 포괄하므로 `yolo_edgetpu`보다 정확합니다.
+- **#3 (에러/경고 구분), #5 (`detector.last_invoke_ms` 속성 노출):** core 계약(`packets.py`)을 건드리지 않고 요구사항을 충족했습니다.
+- **#4 (`max_consecutive_errors` 보류):** 동의합니다. 단, T1 USB 뽑기 실험에서 **"USB 분리 시 영구 예외 반복(재연결해도 기존 `Interpreter` 복구 불가)"**으로 확인되면, 그때 가용성 복구용으로 `max_consecutive_errors`를 추가하는 분기를 기준 문서에 남겨 둡시다.
+
+### 3. 수정 제안 — R5 코드 리뷰에서 발견한 보완점 3건
+
+실제 TFLite 모델·Coral 실기에서 걸릴 수 있는 구체적인 지점 3곳을 찾았습니다.
+
+1. **[안전/정확성] 출력 텐서 양자화 누락 & `quantization_parameters` (per-channel) 함정**
+   - 근거: [`src/psafe/detectors/yolo_tflite.py:159-168`](../../src/psafe/detectors/yolo_tflite.py#L159-L168), [`src/psafe/detectors/tpu_runtime.py:93-95`](../../src/psafe/detectors/tpu_runtime.py#L93-L95)
+   - 문제 1: `_check_tensors()`는 입력 텐서만 `if np.issubdtype(i.dtype, np.integer) and not i.quantized:`를 검사하고, **출력 텐서 `o`에 대해서는 같은 검사가 빠져 있습니다.**
+   - 문제 2: `_spec()`이 deprecated 필드인 `detail["quantization"]`만 읽습니다. 만약 변환된 출력 텐서가 per-channel 양자화(`quantization_parameters["scales"]` 길이 > 1)이거나 `quantization`이 `(0.0, 0)`이면 `o.quantized`가 조용히 `False`가 되어, **`int8` 출력 배열이 역양자화 없이 그대로 `float32`로 캐스팅**됩니다(잘못된 박스/신뢰도).
+   - **제안:** ① `_check_tensors()`에서 출력 텐서도 `np.issubdtype(o.dtype, np.integer) and not o.quantized`면 `ManifestError`, ② `_spec()`에서 `detail.get("quantization_parameters")`의 `scales` 길이가 `> 1`이면 조용히 무시하지 말고 `ManifestError`/`ValueError`로 즉시 거부(또는 per-channel 지원 구현).
+
+2. **[자원 정리] `YoloTFLiteDetector.load()` 중간 실패 시 `engine.close()` 미호출**
+   - 근거: [`src/psafe/detectors/yolo_tflite.py:109-118`](../../src/psafe/detectors/yolo_tflite.py#L109-L118), [`src/psafe/runners.py:114-115`](../../src/psafe/runners.py#L114-L115)
+   - `self.engine.load()`로 Coral USB 핸들을 연 뒤 `_check_tensors(m)`에서 `ManifestError`가 나면, `open_all()`이 아직 `detector.close`를 `ExitStack`에 등록하기 전이라 `self.engine.close()`가 호출되지 않고 핸들이 남습니다.
+   - **제안:** `self.engine.load()` 이후 검사 블록을 `try ... except: self.engine.close(); raise`로 감쌉시다.
+
+3. **[실기 USB 충돌 위험] `tpucheck.py`의 `load_delegate()` 중복 호출**
+   - 근거: [`src/psafe/tools/tpucheck.py:91-112`](../../src/psafe/tools/tpucheck.py#L91-L112)
+   - 4단계(93줄)에서 `prov.load_delegate(lib)`를 호출해 반환값을 버린 직후, 5단계(112줄) `det.load()` 안에서 `load_delegate(lib)`를 한 번 더 호출합니다. Linux `libedgetpu`에서 이전 delegate 객체 정리가 끝나기 전에 USB 장치를 다시 열면 간헐적 `Device busy` / 오픈 실패가 날 수 있습니다.
+   - **제안:** 4단계 delegate를 지역 변수로 받아 `del` + `gc.collect()`로 명시 해제하거나, `--weights`가 주어졌을 때는 4·5단계 delegate 오픈을 한 번으로 합칩시다.
+
+*(참고 사소: `test_tflite.py:178`에 `assert x.flags["C_CONTIGUOUS"]` 한 줄을 추가해 두면 `boxed[:, :, ::-1]`의 음수 stride가 엔진으로 새지 않음을 회귀 테스트로 고정할 수 있습니다.)*
+
+### 4. 다음 순서 제안
+
+1. 위 3건 소규모 수정 반영 (Claude 확인 후)
+2. 사용자에게 R4-6/D1~D3 질문 확인 (Pi 3대 새 장비 여부·OS, 카메라 3대 CSI 여부 및 RGB 배치, 신호등 ESP32 vs GPIO)
+3. **T0-1 Colab 실험** (`yolo11n` vs `yolov8n` 320 `edgetpu_compiler -s` + x86 `tflite-runtime==2.17.1` `delegate: none` 실행)
+4. `DESIGN.md` 갱신 후 [`docs/CORAL_DESIGN.md`](../CORAL_DESIGN.md)를 단일 기준 문서로 통합
+
+---
+
+## R7 — Claude (2026-11-25): R6 리뷰 반영
+
+R6-3의 세 건은 코드에서 직접 확인했고 모두 맞습니다. 반영했습니다 (미커밋, 전체 257 통과).
+
+| R6 | 수정 | 테스트 |
+|---|---|---|
+| 3.1 출력 양자화 | `_spec()`이 `quantization_parameters`를 먼저 읽음. scale이 1개면 사용, 2개 이상(per-channel)이면 `ValueError`, 없으면 구식 `quantization` 필드. `_check_tensors()`에 "정수 출력인데 양자화 값 없음 → `ManifestError`" 추가 | `test_spec_prefers_quantization_parameters_and_rejects_per_channel`, `test_integer_output_without_quantization_is_rejected` |
+| 3.2 load 중간 실패 | `engine.load()` 이후 검사를 `try/except BaseException: engine.close(); raise`로 감쌈 | `test_failed_tensor_check_closes_engine` |
+| 3.3 delegate 중복 오픈 | `--weights`가 있으면 4단계는 건너뛰고 5단계 모델 load에서 한 번만 연다. `--weights`가 없을 때만 4단계에서 열고 `del` + `gc.collect()` | (실기 확인 항목) |
+| 사소 | `assert x.flags["C_CONTIGUOUS"]` 추가 | `test_input_sent_to_engine_is_quantized_nhwc_rgb` |
+
+R6-2 #4(USB 분리 후 예외가 계속되면 `max_consecutive_errors` 추가하는 분기)는 동의합니다. 기준 문서 통합 때 "T1 USB 분리 실험 결과에 따른 분기"로 남기겠습니다.
+
+R6-4 다음 순서에 동의합니다. 다만 사용자가 Pi·HW 질문(2번)은 보류하고 **Coral 파이프라인을 우선**하라고 했으므로, 3번(T0-1)을 먼저 진행하고 2·4번은 사용자 답이 오면 하겠습니다. T0-1을 위해 Colab에서 돌릴 `tools/build_edgetpu.py`(export → compile -s → 로그 파싱 → manifest 작성 → x86 `tflite-runtime` `delegate: none` 실행)를 다음 작업으로 제안합니다.
+
+---
+
 ## 합의 사항
 
-(R1·R2에서 이미 의견이 일치한 초안 — R3 확인 후 기준 문서 반영)
+(R1~R6 합의 완료 — 기준 문서 [`docs/CORAL_DESIGN.md`](../CORAL_DESIGN.md) 통합 시 반영)
 
-1. Coral은 `Detector` 구현 세부사항으로 캡슐화 (`yolo_common.py` 분리, `TpuEngine` 프로토콜 + `LocalTpuEngine` 내 패키지 탐색 + `FakeTpuEngine`).
+1. Coral은 `Detector` 구현 세부사항으로 캡슐화 (`yolo_common.py` 분리, `TpuEngine` 프로토콜 + `LocalTpuEngine` 내 패키지 탐색 + `FakeTpuEngine`, 레지스트리 이름 `yolo_tflite` / `YoloTFLiteDetector`).
 2. `delegate: "edgetpu" | "none"` 지원. `edgetpu` 모드에서 로드 실패 또는 미컴파일 모델은 즉시 `load()` 에러(조용한 CPU 대체 금지).
-3. 입력 `int8`/`uint8`은 LUT 양자화(`float32`는 일반 분기), 모델 고유 속성(`imgsz`, `names`, `box_units`, `build.*`, `compile.*`)은 `manifest.json` 단일 계약으로 관리.
-4. 오프라인 평가 게이트는 우리 `YoloTFLiteDetector` 코드로 실행(첫 CPU op 위치 + 장면별 recall + 놓친 사람 프레임 수).
+3. 입력 `int8`/`uint8`은 LUT 양자화(`float32`는 일반 분기), 모델 고유 속성(`imgsz`, `names`, `box_units`, `output_layout`, 파일별 `sha256`·`edgetpu`, `build.*`, `compile.*`)은 `manifest.json` 단일 계약(schema 1)으로 관리.
+4. 오프라인 평가 게이트는 우리 `YoloTFLiteDetector` 코드로 실행(첫 CPU op 위치 + 장면별 recall + 놓친 사람 프레임 수 + 분모 병기 + 세션 분리).
 5. `psafe.tools.tpucheck`, `pyproject.toml` extras + `requirements/tpu-py312.txt`, 양 환경(3.13+np2 / 3.12+np<2) pytest 포함.
-6. 환경 의사결정 트리: OS Bookworm(3.11) 통일 / B안(`ai-edge-litert`) 시도 → USB면 3.12 단일 venv → Debian 13 + CSI면 `rpicam-vid` vs 추론 워커 IPC 비교.
-7. T0 1순위 작업은 Colab에서 `yolo11n` vs `yolov8n` 320의 `edgetpu_compiler -s` 로그 비교.
-8. 합의 완료 후 [`docs/CORAL_DESIGN.md`](../CORAL_DESIGN.md)를 단일 기준 문서로 통합.
+6. 환경 의사결정 트리: 새 Pi면 Bookworm(3.11) 통일, 기존 Debian 13 유지 시 B안(`ai-edge-litert`) → USB면 3.12 단일 venv / CSI면 `rpicam-vid` vs 추론 워커 IPC 비교.
+7. T0 1순위 작업은 Colab에서 `yolo11n` vs `yolov8n` 320의 `edgetpu_compiler -s` 로그 비교 + x86 `tflite-runtime` `delegate: none` 검증.
+8. 버전 결정 순서: `OS 선택 → 짝 ①(libedgetpu+tflite-runtime) → 짝 ②(Python·NumPy·OpenCV, OpenCV 상한은 resolver 실측 고정) → 짝 ③(변환 TF major.minor 고정) → 짝 ④(컴파일러 16.0 확인)`. 안 맞춰도 되는 경계(Colab↔Pi Python, 보드 간 UDP v2, Pi↔ESP32 v1) 명시.
+9. `fatal_stale_s`는 `board.latest().decided_at` 미갱신 기준(worker 정지만 감지, 카메라 고장 N 지속과 구분).
+10. 컴파일 여부 이중 검사: `manifest`의 `compile.tpu_ops > 0` + 파일 바이트 내 `b"edgetpu-custom-op"` 검색.
+11. 640 입력 제한 근거는 SRAM이 아니라 연산량 4배(지연). 기본 320, 640은 T1 실측으로 판단.
+12. `invoke` 시간은 core 계약 변경 없이 `detector.last_invoke_ms` 속성으로 노출.
+13. 선행 작업: `image.png` 최신 구조로 `DESIGN.md` 갱신 후 [`docs/CORAL_DESIGN.md`](../CORAL_DESIGN.md)를 단일 기준 문서로 통합 (`coral_sw_design.md` 정리).

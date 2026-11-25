@@ -107,8 +107,14 @@ class YoloTFLiteDetector(Detector):
         self._check_file(m, wpath, data)
 
         self.engine.load(str(wpath))
-        self._check_runtime_version(m)
-        self._check_tensors(m)
+        try:
+            self._check_runtime_version(m)
+            self._check_tensors(m)
+        except BaseException:
+            # open_all()은 load()가 성공한 뒤에야 close를 등록한다. 여기서 실패하면 Coral 핸들을
+            # 직접 닫아야 남지 않는다 (DISCUSSION.md R6-3.2)
+            self.engine.close()
+            raise
 
         self._lut = input_lut(self._in) if self._in.quantized else None
         self.names = [self.class_map.get(n, n) for n in m.names]
@@ -162,6 +168,9 @@ class YoloTFLiteDetector(Detector):
         if len(outs) != 1:
             raise ManifestError(f"{self.weights}: expected 1 output tensor, got {len(outs)}")
         self._out = o = outs[0]
+        if np.issubdtype(o.dtype, np.integer) and not o.quantized:
+            # 역양자화 없이 int8을 float로 쓰면 박스·신뢰도가 조용히 틀린다 (R6-3.1)
+            raise ManifestError(f"{self.weights}: integer output without quantization parameters")
         ch_axis = 1 if m.output_layout == "chw" else 2
         if len(o.shape) != 3 or o.shape[0] != 1 or o.shape[ch_axis] != 4 + nc:
             raise ManifestError(f"{self.weights}: output {o.shape} doesn't match layout '{m.output_layout}' "

@@ -91,8 +91,21 @@ def _dist_version(name: str) -> str:
 
 
 def _spec(detail: dict) -> TensorSpec:
-    scale, zp = detail.get("quantization", (0.0, 0))
-    return TensorSpec(tuple(int(d) for d in detail["shape"]), np.dtype(detail["dtype"]), float(scale), int(zp))
+    """양자화 값은 quantization_parameters(현행)를 먼저 읽고, 없으면 quantization(구식) 필드를 쓴다.
+    per-channel(scale 여러 개) 텐서는 우리 역양자화가 다루지 않으므로 조용히 넘기지 않고 거부한다.
+    구식 필드는 per-channel일 때 (0.0, 0)이라, 그것만 읽으면 int8을 역양자화 없이 쓰게 된다 (DISCUSSION.md R6-3.1)."""
+    shape = tuple(int(d) for d in detail["shape"])
+    qp = detail.get("quantization_parameters") or {}
+    scales = np.atleast_1d(np.asarray(qp.get("scales", []), dtype=np.float64))
+    zps = np.atleast_1d(np.asarray(qp.get("zero_points", []), dtype=np.int64))
+    if scales.size > 1:
+        raise ValueError(f"tensor '{detail.get('name', '?')}' {shape}: per-channel quantization "
+                         f"({scales.size} scales) is not supported for model inputs/outputs")
+    if scales.size == 1:
+        scale, zp = float(scales[0]), int(zps[0]) if zps.size else 0
+    else:
+        scale, zp = detail.get("quantization", (0.0, 0))
+    return TensorSpec(shape, np.dtype(detail["dtype"]), float(scale), int(zp))
 
 
 class LocalTpuEngine:
