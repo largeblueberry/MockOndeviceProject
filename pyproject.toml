@@ -22,6 +22,8 @@ onnx = ["onnxruntime"]
 tflite = ["tflite-runtime"]
 litert = ["ai-edge-litert"]
 serial = ["pyserial"]
+# 통신 방식 비교 측정 (EXPERIMENTS EXP-012, psafe.tools.commbench). 브로커 mosquitto는 별도 설치
+commbench = ["paho-mqtt>=2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
