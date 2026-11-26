@@ -1,0 +1,7 @@
+run fcd8d282  proto tcp
+  client: slots 1500  echoed 1500  lost 0  errors 0  skipped 0  loss 0.00%
+          RTT p50 11.02  p95 13.88  p99 64.67  max 213.64  jitter(sd) 10.74 ms
+  server: received 1500  dup 0  max gap 403 ms  excess p99 56.5 / max 210 ms  stale 0  293 B  server boots 1
+  [FAIL] C1 p99 RTT <= 50 ms: 64.7 ms
+  [PASS] C2 max receive gap < 500 ms: 403.3 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 210 ms)

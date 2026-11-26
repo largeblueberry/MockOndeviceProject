@@ -1,0 +1,62 @@
+normal done, starting F2/F3 16:43:20
+=== F2_udp start 16:43:22
+  killed server 16:43:46.803
+  restarted server 16:43:52.014
+run 6e07e5f3  proto udp
+  client: slots 300  echoed 269  lost 31  errors 0  skipped 0  loss 10.33%
+          RTT p50 12.59  p95 34.56  p99 110.45  max 138.33  jitter(sd) 15.49 ms
+  server: received 269  dup 0  max gap 6398 ms  excess p99 78.9 / max 108 ms  stale 0  294 B  server boots 2  recovery lag 1398 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 108 ms)
+=== F2_http start 16:44:39
+  killed server 16:45:03.419
+  restarted server 16:45:08.597
+run 52a94a22  proto http
+  client: slots 300  echoed 267  lost 0  errors 33  skipped 0  loss 11.00%
+          RTT p50 18.91  p95 39.29  p99 97.22  max 125.71  jitter(sd) 12.91 ms
+  server: received 267  dup 0  max gap 6861 ms  excess p99 82.9 / max 114 ms  stale 0  295 B  server boots 2  recovery lag 1861 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 114 ms)
+=== F2_http-new start 16:45:56
+  killed server 16:46:20.346
+  restarted server 16:46:25.525
+run 5278fdb1  proto http-new
+  client: slots 300  echoed 269  lost 0  errors 31  skipped 0  loss 10.33%
+          RTT p50 34.66  p95 61.85  p99 99.59  max 134.45  jitter(sd) 14.51 ms
+  server: received 269  dup 0  max gap 6415 ms  excess p99 68.5 / max 118 ms  stale 0  298 B  server boots 2  recovery lag 1415 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 118 ms)
+=== F2_mqtt0 start 16:47:13
+  killed server 16:47:38.174
+  restarted server 16:47:43.431
+run 851bf796  proto mqtt0
+  client: slots 300  echoed 269  lost 31  errors 0  skipped 0  loss 10.33%
+          RTT p50 18.24  p95 36.93  p99 65.99  max 99.68  jitter(sd) 10.76 ms
+  server: received 269  dup 0  max gap 6411 ms  excess p99 54.0 / max 64 ms  stale 0  296 B  server boots 2  recovery lag 1411 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 64 ms)
+=== F2_mqtt1 start 16:48:32
+  killed server 16:48:56.457
+  restarted server 16:49:01.665
+run d2d2b29b  proto mqtt1
+  client: slots 300  echoed 269  lost 31  errors 0  skipped 0  loss 10.33%
+          RTT p50 16.75  p95 47.08  p99 142.90  max 178.91  jitter(sd) 21.75 ms
+  server: received 269  dup 0  max gap 6407 ms  excess p99 120.2 / max 169 ms  stale 0  295 B  server boots 2  recovery lag 1407 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 169 ms)
+=== F3_mqtt0 start 16:49:50
+  killed broker 16:50:15.196
+  restarted broker 16:50:21.473
+run 0dcd835c  proto mqtt0
+  client: slots 300  echoed 264  lost 0  errors 36  skipped 0  loss 12.00%
+          RTT p50 17.14  p95 37.49  p99 81.58  max 136.73  jitter(sd) 13.30 ms
+  server: received 264  dup 0  max gap 7390 ms  excess p99 74.0 / max 121 ms  stale 0  296 B  server boots 1  recovery lag 2390 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 121 ms)
+=== F3_mqtt1 start 16:51:03
+  killed broker 16:51:27.124
+  restarted broker 16:51:33.294
+run 47041a2d  proto mqtt1
+  client: slots 300  echoed 300  lost 0  errors 35  skipped 0  loss 0.00%
+          RTT p50 12.42  p95 3921.98  p99 6314.70  max 6908.30  jitter(sd) 1320.12 ms
+  server: received 300  dup 0  max gap 7094 ms  excess p99 6300.7 / max 6898 ms  stale 33  296 B  server boots 1  recovery lag 2094 ms
+  [FAIL] C3 stale (> 500 ms late) == 0: 33 (max 6898 ms)
+2081 /usr/sbin/mosquitto -c /etc/mosquitto/mosquitto.conf
+5551 /usr/sbin/mosquitto -c /home/linux/commbench/mosq.conf
+=== done 16:52:16
+
+[exited with code 0]

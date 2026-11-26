@@ -1,0 +1,30 @@
+run 598f1ebc  proto udp
+  client: slots 300  echoed 272  lost 28  errors 0  skipped 0  loss 9.33%
+          RTT p50 10.55  p95 13.56  p99 20.27  max 106.71  jitter(sd) 7.41 ms
+  server: received 272  dup 0  max gap 5798 ms  excess p99 15.7 / max 95 ms  stale 0  293 B  server boots 1  recovery lag 798 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 95 ms)
+run 27033722  proto tcp
+  client: slots 300  echoed 300  lost 0  errors 0  skipped 0  loss 0.00%
+          RTT p50 10.95  p95 4030.20  p99 6414.41  max 7009.71  jitter(sd) 1349.06 ms
+  server: received 300  dup 0  max gap 7203 ms  excess p99 6409.4 / max 7005 ms  stale 33  294 B  server boots 1  recovery lag 2203 ms
+  [FAIL] C3 stale (> 500 ms late) == 0: 33 (max 7005 ms)
+run 9cf00a80  proto http
+  client: slots 300  echoed 270  lost 0  errors 6  skipped 24  loss 10.00%
+          RTT p50 17.00  p95 37.82  p99 165.06  max 246.04  jitter(sd) 23.89 ms
+  server: received 271  dup 0  max gap 6033 ms  excess p99 71.8 / max 110 ms  stale 0  295 B  server boots 1  recovery lag 1033 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 110 ms)
+run 175bfc2e  proto http-new
+  client: slots 300  echoed 270  lost 0  errors 6  skipped 24  loss 10.00%
+          RTT p50 22.31  p95 69.74  p99 137.39  max 151.60  jitter(sd) 19.92 ms
+  server: received 270  dup 0  max gap 6216 ms  excess p99 116.5 / max 133 ms  stale 0  298 B  server boots 1  recovery lag 1216 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 133 ms)
+run 5a05ac7a  proto mqtt0
+  client: slots 300  echoed 271  lost 28  errors 1  skipped 0  loss 9.67%
+          RTT p50 13.47  p95 21.88  p99 113.78  max 138.51  jitter(sd) 16.56 ms
+  server: received 271  dup 0  max gap 6004 ms  excess p99 88.0 / max 119 ms  stale 0  296 B  server boots 1  recovery lag 1004 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 119 ms)
+run 16021091  proto mqtt1
+  client: slots 300  echoed 300  lost 0  errors 0  skipped 0  loss 0.00%
+          RTT p50 18.03  p95 3044.15  p99 5428.53  max 6027.35  jitter(sd) 1084.06 ms
+  server: received 300  dup 0  max gap 6217 ms  excess p99 5419.0 / max 6018 ms  stale 28  296 B  server boots 1  recovery lag 1217 ms
+  [FAIL] C3 stale (> 500 ms late) == 0: 28 (max 6018 ms)

@@ -1,0 +1,5 @@
+run ab97e749  proto tcp
+  client: slots 300  echoed 269  lost 0  errors 31  skipped 0  loss 10.33%
+          RTT p50 11.40  p95 14.53  p99 33.19  max 96.79  jitter(sd) 7.48 ms
+  server: received 269  dup 0  max gap 6407 ms  excess p99 27.3 / max 80 ms  stale 0  292 B  server boots 2  recovery lag 1407 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 80 ms)

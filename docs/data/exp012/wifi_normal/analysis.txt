@@ -1,0 +1,43 @@
+=== udp start 16:17:02
+run bd179d07  proto udp
+  client: slots 1500  echoed 1500  lost 0  errors 0  skipped 0  loss 0.00%
+          RTT p50 13.73  p95 41.86  p99 71.20  max 150.16  jitter(sd) 13.62 ms
+  server: received 1500  dup 0  max gap 326 ms  excess p99 56.0 / max 136 ms  stale 0  294 B  server boots 1
+  [FAIL] C1 p99 RTT <= 50 ms: 71.2 ms
+  [PASS] C2 max receive gap < 500 ms: 326.0 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 136 ms)
+=== http start 16:22:14
+run adf6b6dd  proto http
+  client: slots 1500  echoed 1500  lost 0  errors 0  skipped 0  loss 0.00%
+          RTT p50 19.53  p95 38.56  p99 72.07  max 138.85  jitter(sd) 11.43 ms
+  server: received 1500  dup 0  max gap 296 ms  excess p99 52.7 / max 124 ms  stale 0  295 B  server boots 1
+  [FAIL] C1 p99 RTT <= 50 ms: 72.1 ms
+  [PASS] C2 max receive gap < 500 ms: 296.0 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 124 ms)
+=== http-new start 16:27:27
+run 39471a57  proto http-new
+  client: slots 1500  echoed 1500  lost 0  errors 0  skipped 0  loss 0.00%
+          RTT p50 32.37  p95 84.26  p99 171.60  max 261.97  jitter(sd) 26.89 ms
+  server: received 1500  dup 0  max gap 352 ms  excess p99 104.5 / max 235 ms  stale 0  299 B  server boots 1
+  [FAIL] C1 p99 RTT <= 50 ms: 171.6 ms
+  [PASS] C2 max receive gap < 500 ms: 352.2 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 235 ms)
+=== mqtt0 start 16:32:40
+run 76ad651a  proto mqtt0
+  client: slots 1500  echoed 1500  lost 0  errors 0  skipped 0  loss 0.00%
+          RTT p50 15.48  p95 32.17  p99 71.72  max 142.28  jitter(sd) 11.43 ms
+  server: received 1500  dup 0  max gap 324 ms  excess p99 59.7 / max 131 ms  stale 0  296 B  server boots 1
+  [FAIL] C1 p99 RTT <= 50 ms: 71.7 ms
+  [PASS] C2 max receive gap < 500 ms: 323.6 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 131 ms)
+=== mqtt1 start 16:37:52
+run 3b88b51f  proto mqtt1
+  client: slots 1500  echoed 1500  lost 0  errors 0  skipped 0  loss 0.00%
+          RTT p50 18.09  p95 38.56  p99 74.66  max 137.83  jitter(sd) 12.17 ms
+  server: received 1500  dup 0  max gap 316 ms  excess p99 62.8 / max 129 ms  stale 0  296 B  server boots 1
+  [FAIL] C1 p99 RTT <= 50 ms: 74.7 ms
+  [PASS] C2 max receive gap < 500 ms: 315.6 ms
+  [PASS] C3 stale (> 500 ms late) == 0: 0 (max 129 ms)
+=== done 16:43:07
+
+[exited with code 0]

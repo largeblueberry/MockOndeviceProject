@@ -39,7 +39,7 @@ def test_message_padding_hits_requested_size(size):
 
 
 def test_kind():
-    assert [cb.kind(p) for p in cb.PROTOS] == ["udp", "http", "http", "mqtt", "mqtt"]
+    assert [cb.kind(p) for p in cb.PROTOS] == ["udp", "tcp", "http", "http", "mqtt", "mqtt"]
 
 
 # ---- 분석 -----------------------------------------------------------------
@@ -80,7 +80,8 @@ def test_verdict_normal_run_pass():
 
 # ---- localhost 왕복 ---------------------------------------------------------
 
-@pytest.mark.parametrize("proto, sock", [("udp", socket.SOCK_DGRAM), ("http", socket.SOCK_STREAM),
+@pytest.mark.parametrize("proto, sock", [("udp", socket.SOCK_DGRAM), ("tcp", socket.SOCK_STREAM),
+                                         ("http", socket.SOCK_STREAM),
                                          ("http-new", socket.SOCK_STREAM)])
 def test_localhost_round_trip(tmp_path, proto, sock):
     port = free_port(sock)
@@ -104,3 +105,18 @@ def test_http_client_survives_server_down(tmp_path):
     cl = cb.Client("http", ("127.0.0.1", port), str(tmp_path / "c.csv"), rate=20, timeout=0.2, quiet=True)
     summ = cl.run_for(0.3)
     assert summ["echoed"] == 0 and summ["errors"] + summ["skipped"] == summ["slots"]
+
+
+def test_tcp_client_reconnects_after_server_restart(tmp_path):
+    """서버가 죽으면 그 동안은 error/lost, 서버가 다시 뜨면 같은 Client가 다시 연결해 echo를 받는다."""
+    port = free_port(socket.SOCK_STREAM)
+    cli_log = tmp_path / "c.csv"
+    srv1 = cb.Server("tcp", None, bind=("127.0.0.1", port))
+    srv1.serve(0.4)                                   # 0.4초 뒤 스스로 멈춘다 (블록)
+    cl = cb.Client("tcp", ("127.0.0.1", port), str(cli_log), rate=20, timeout=0.2, quiet=True)
+    srv2 = cb.Server("tcp", None, bind=("127.0.0.1", port))
+    threading.Timer(0.4, lambda: threading.Thread(target=srv2.serve, args=(2.0,), daemon=True).start()).start()
+    summ = cl.run_for(1.2)
+    srv2.stop()
+    assert summ["echoed"] > 0                          # 재시작 뒤 다시 받음
+    assert summ["errors"] + summ["lost"] + summ["skipped"] > 0   # 서버 없는 동안은 실패

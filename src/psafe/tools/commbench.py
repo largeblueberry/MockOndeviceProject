@@ -2,6 +2,7 @@
 
     # 받는 쪽 (허브 C 역할). 받은 시각을 기록하고 그대로 되돌려 보낸다(echo)
     python -m psafe.tools.commbench server --proto udp  --bind 0.0.0.0:6000 --log srv_udp.csv
+    python -m psafe.tools.commbench server --proto tcp  --bind 0.0.0.0:6002 --log srv_tcp.csv
     python -m psafe.tools.commbench server --proto http --bind 0.0.0.0:6001 --log srv_http.csv
     python -m psafe.tools.commbench server --proto mqtt1 --broker 192.168.20.22:1884 --log srv_mqtt1.csv
 
@@ -13,6 +14,8 @@
 
 방식 (--proto)
     udp        데이터그램 1개 = 메시지 1개 (지금 psafe.link가 쓰는 방식)
+    tcp        TCP 연결 유지 + 줄바꿈 1개 = 메시지 1개, TCP_NODELAY. UDP처럼 보내고 응답을 기다리지 않는다.
+               보내기 실패(연결 끊김)면 다음 전송에서 다시 연결. 끊긴 동안 커널 버퍼에 쌓인 것은 나중에 도착할 수 있다
     http       HTTP POST, 연결 유지(keep-alive). 실패하면 다음 전송에서 다시 연결
     http-new   HTTP POST, 메시지마다 새 TCP 연결
     mqtt0      MQTT QoS 0 (브로커 경유, 최대 한 번)
@@ -52,7 +55,7 @@ from psafe.link.messages import Report, new_boot_id
 
 log = logging.getLogger("psafe.commbench")
 
-PROTOS = ("udp", "http", "http-new", "mqtt0", "mqtt1")
+PROTOS = ("udp", "tcp", "http", "http-new", "mqtt0", "mqtt1")
 REQ_TOPIC, RESP_TOPIC = "psafe/bench/req", "psafe/bench/resp"
 CLIENT_FIELDS = ("run", "proto", "seq", "t_send_ns", "t_echo_ns", "status")
 SERVER_FIELDS = ("run", "proto", "seq", "t_send_ns", "t_recv_ns", "server_boot", "bytes")
@@ -69,8 +72,10 @@ DEFAULT_TIMEOUT_S = 1.0       # HTTP 요청 / echo 대기 한도
 # ---------------------------------------------------------------------------
 
 def kind(proto: str) -> str:
-    """udp / http / mqtt (http-new, mqtt0/1의 계열)"""
-    return "udp" if proto == "udp" else "http" if proto.startswith("http") else "mqtt"
+    """udp / tcp / http / mqtt (http-new, mqtt0/1의 계열)"""
+    if proto in ("udp", "tcp"):
+        return proto
+    return "http" if proto.startswith("http") else "mqtt"
 
 
 def make_message(run: str, seq: int, proto: str, size: int = 0, t_send_ns: int | None = None) -> bytes:
@@ -214,6 +219,56 @@ class Server:
         self._closers.append(s.close)
         self.ready.set()
 
+    def _serve_tcp(self) -> None:
+        ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        ls.bind(self.bind)
+        ls.listen(8)
+        ls.settimeout(0.2)
+        self.bind = ls.getsockname()
+        conns: list[socket.socket] = []
+
+        def handle(c: socket.socket) -> None:
+            c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            f = c.makefile("rb")
+            try:
+                for line in f:
+                    line = line.rstrip(b"\n")
+                    if not line:
+                        continue
+                    self._record(line)
+                    c.sendall(line + b"\n")
+            except OSError:
+                pass
+            finally:
+                c.close()
+
+        def accept_loop():
+            while not self._stop.is_set():
+                try:
+                    c, _ = ls.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    return
+                c.settimeout(None)
+                conns.append(c)
+                threading.Thread(target=handle, args=(c,), daemon=True, name="tcp-conn").start()
+
+        threading.Thread(target=accept_loop, daemon=True, name="tcp-server").start()
+
+        def close_all():
+            ls.close()
+            for c in conns:
+                try:
+                    c.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                c.close()
+
+        self._closers.append(close_all)
+        self.ready.set()
+
     def _serve_http(self) -> None:
         srv = self
 
@@ -303,6 +358,9 @@ class Client:
             self._sock = s
             threading.Thread(target=self._udp_recv, daemon=True, name="udp-recv").start()
             self._closers.append(s.close)
+        elif k == "tcp":
+            self._tcp: socket.socket | None = None
+            self._closers.append(self._tcp_close)
         elif k == "http":
             self._conn: http.client.HTTPConnection | None = None
         elif k == "mqtt":
@@ -332,6 +390,8 @@ class Client:
                 self._sock.sendto(data, self.server)
             except OSError as e:
                 self.status[seq] = f"error:{type(e).__name__}"
+        elif k == "tcp":
+            self._tcp_send(seq, data)
         elif k == "mqtt":
             info = self._mqtt.publish(REQ_TOPIC, data, qos=self._qos)
             if info.rc != 0:
@@ -356,6 +416,49 @@ class Client:
             if self._conn is not None:
                 self._conn.close()
             self._conn = None
+
+    def _tcp_send(self, seq: int, data: bytes) -> None:
+        """연결이 없으면 연다(timeout 한도). sendall은 커널 버퍼에 넣기만 하므로 보통 바로 돌아온다.
+        실패하면 연결을 버리고 다음 전송에서 다시 연다."""
+        try:
+            if self._tcp is None:
+                s = socket.create_connection(self.server, timeout=self.timeout)
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                s.settimeout(self.timeout)
+                self._tcp = s
+                threading.Thread(target=self._tcp_recv, args=(s,), daemon=True, name="tcp-recv").start()
+            self._tcp.sendall(data + b"\n")
+        except OSError as e:
+            self.status[seq] = f"error:{type(e).__name__}"
+            self._tcp_close()
+
+    def _tcp_close(self) -> None:
+        s, self._tcp = self._tcp, None
+        if s is not None:
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            s.close()
+
+    def _tcp_recv(self, s: socket.socket) -> None:
+        buf = b""
+        while not self._stop.is_set():
+            try:
+                chunk = s.recv(65535)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            if not chunk:                            # 서버가 닫음 -> 다음 전송에서 다시 연결
+                if self._tcp is s:
+                    self._tcp_close()
+                return
+            buf += chunk
+            *lines, buf = buf.split(b"\n")
+            for line in lines:
+                if line:
+                    self._got_echo(line)
 
     def _udp_recv(self) -> None:
         while not self._stop.is_set():
@@ -563,14 +666,14 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("server", help="받는 쪽 (허브 C 역할)")
     s.add_argument("--proto", choices=PROTOS, required=True)
-    s.add_argument("--bind", type=parse_addr, default=("0.0.0.0", 6000), help="udp/http")
+    s.add_argument("--bind", type=parse_addr, default=("0.0.0.0", 6000), help="udp/tcp/http")
     s.add_argument("--broker", type=parse_addr, default=("127.0.0.1", 1884), help="mqtt")
     s.add_argument("--log", help="수신 기록 CSV (이어 쓴다)")
     s.add_argument("--seconds", type=float, help="기본: Ctrl+C까지")
 
     c = sub.add_parser("client", help="보내는 쪽 (노드 A 역할)")
     c.add_argument("--proto", choices=PROTOS, required=True)
-    c.add_argument("--server", type=parse_addr, required=True, help="udp/http: 서버, mqtt: 브로커")
+    c.add_argument("--server", type=parse_addr, required=True, help="udp/tcp/http: 서버, mqtt: 브로커")
     c.add_argument("--rate", type=float, default=5.0, help="Hz (실제 Report 주기 = 5)")
     c.add_argument("--seconds", type=float, default=60.0)
     c.add_argument("--size", type=int, default=0, help="메시지 바이트 수 (0 = 패딩 없음)")
